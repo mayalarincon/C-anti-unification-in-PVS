@@ -1,0 +1,361 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%  Substitutions acting on C-terms (Antiunify th) %%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Elementary properties of the action of substitutions (theory
+% first_order_substitution) on C-terms:
+%   - application and preservation: C-substitutions map C-terms to C-terms
+%     and commute with the term constructors, C_swap and composition;
+%   - properties of first_order_substitution inherited by C-terms;
+%   - stability of C-equivalence under C-substitutions;
+%   - equality and instantiation order of C-substitutions modulo C.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+first_order_C_substitution[(IMPORTING first_order_substitution)
+                           C_symbol: PRED[f_symbol]]: THEORY
+BEGIN
+
+IMPORTING first_order_C_equality[C_symbol]
+
+a: VAR constant
+X: VAR variable
+f: VAR f_symbol
+s, t, r: VAR C_term
+sigma, delta, gamma: VAR C_sub
+rho: VAR renaming
+set_vars: VAR finite_set[variable]
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%  Application and preservation  %%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% the action of a C-substitution on a C-term (or a variable) is a C-term
+subs_C_closed: LEMMA C_term?(subs(sigma)(t))
+%|- subs_C_closed : PROOF
+%|- (then (skosimp* :preds? t) (use "subs_C_term") (assert))
+%|- QED
+
+subs_C_var: LEMMA C_term?(subs(sigma)(X))
+%|- subs_C_var : PROOF
+%|- (then (skosimp* :preds? t) (expand "C_sub?" -) (inst?))
+%|- QED
+
+subs_C_renaming: LEMMA C_term?(subs(rho)(t))
+%|- subs_C_renaming : PROOF
+%|- (then (skosimp* :preds? t) (use "subs_C_term" ("sigma" "rho!1" "t" "t!1"))
+%|-       (assert) (lemma "renaming_is_C_sub") (inst - "rho!1") (assert))
+%|- QED
+
+% subterms of instances of C-terms are C-terms
+subs_C_subterms: LEMMA
+    member(r, subterms(subs(sigma)(t))) IMPLIES C_term?(r)
+%|- subs_C_subterms : PROOF
+%|- (then (skosimp* :preds? t) (use "subs_C_term") (assert) (use
+%|-       "C_term_subterms" ("t" "subs(sigma!1)(t!1)")) (assert))
+%|- QED
+
+% action on the constructors
+subs_C_const: LEMMA subs(sigma)(const(a)) = const(a)
+%|- subs_C_const : PROOF
+%|- (then (skeep) (rewrite "subs_const"))
+%|- QED
+
+subs_C_unit: LEMMA subs(sigma)(unit) = unit
+%|- subs_C_unit : PROOF
+%|- (then (skeep) (rewrite "subs_unit"))
+%|- QED
+
+subs_C_pair: LEMMA
+    subs(sigma)(pair(s, t)) = pair(subs(sigma)(s), subs(sigma)(t))
+%|- subs_C_pair : PROOF
+%|- (then (skeep) (rewrite "subs_pair"))
+%|- QED
+
+subs_C_app: LEMMA
+    C_term?(app(f, t)) IMPLIES subs(sigma)(app(f, t)) = app(f, subs(sigma)(t))
+%|- subs_C_app : PROOF
+%|- (then (skeep) (rewrite "subs_app"))
+%|- QED
+
+subs_C_app_C: LEMMA
+    C_symbol(f) IMPLIES
+      subs(sigma)(app(f, pair(s, t))) = app(f, pair(subs(sigma)(s), subs(sigma)(t)))
+%|- subs_C_app_C : PROOF
+%|- (then (skeep) (rewrite "subs_app") (rewrite "subs_pair"))
+%|- QED
+
+% substitution preserves the head symbol of an application
+subs_C_app_head: LEMMA
+    app?(t) IMPLIES app?(subs(sigma)(t)) AND f_sym(subs(sigma)(t)) = f_sym(t)
+%|- subs_C_app_head : PROOF
+%|- (then (skeep) (lemma "subs_app" ("sigma" "sigma" "f" "f_sym(t)" "arg"
+%|-       "arg(t)")) (lemma "first_order_term_app_eta") (inst - "t") (replace
+%|-       -1) (replace -2) (assert))
+%|- QED
+
+% substitution commutes with swapping the arguments of a commutative symbol
+subs_C_swap: LEMMA
+    FORALL (t: C_term | app?(t) AND C_symbol(f_sym(t))):
+      subs(sigma)(C_swap(t)) = C_swap(subs(sigma)(t))
+%|- subs_C_swap_TCC1 : PROOF
+%|- (then (skosimp* :preds? t) (use "subs_C_app_head") (assert) (flatten)
+%|-       (assert))
+%|- QED
+%|- subs_C_swap : PROOF
+%|- (then (skosimp* :preds? t) (expand "C_swap") (rewrite "subs_app") (rewrite
+%|-       "subs_pair") (use "C_term_app_C_pair") (assert) (lemma "subs_app"
+%|-       ("sigma" "sigma!1" "f" "f_sym(t!1)" "arg" "arg(t!1)")) (lemma
+%|-       "first_order_term_app_eta") (inst - "t!1") (replace -1) (hide -1)
+%|-       (lemma "subs_pair" ("sigma" "sigma!1" "t" "term1(arg(t!1))" "s"
+%|-       "term2(arg(t!1))")) (lemma "first_order_term_pair_eta") (inst -
+%|-       "arg(t!1)") (replace -1) (hide -1) (replace -2 1) (replace -1 1)
+%|-       (assert))
+%|- QED
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%  Properties inherited from first_order_substitution  %%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% composition of C-substitutions
+subs_C_compose: LEMMA
+    subs(append(sigma, delta))(t) = subs(sigma)(subs(delta)(t))
+%|- subs_C_compose : PROOF
+%|- (then (skeep) (rewrite "subs_append2"))
+%|- QED
+
+% substitutions that do not touch the variables of a C-term
+subs_C_no_effect: LEMMA
+    disjoint?(dom(sigma), vars(t)) IMPLIES subs(sigma)(t) = t
+%|- subs_C_no_effect : PROOF
+%|- (then (skeep) (use "subs_no_effect_t") (assert))
+%|- QED
+
+% variables of an instance
+subs_C_vars: LEMMA
+    subset?(vars(subs(sigma)(t)), union(vars(img(sigma)), vars(t)))
+%|- subs_C_vars : PROOF
+%|- (then (skeep) (use "vars_subs_t"))
+%|- QED
+
+subs_C_vars_dom: LEMMA
+    subset?(vars(t), dom(sigma)) IMPLIES subset?(vars(subs(sigma)(t)), vars(img(sigma)))
+%|- subs_C_vars_dom : PROOF
+%|- (then (skeep) (use "vars_subs_t2") (assert))
+%|- QED
+
+% idempotence
+subs_C_idempotent: LEMMA
+    idempotent?(sigma) IMPLIES subs(sigma)(subs(sigma)(t)) = subs(sigma)(t)
+%|- subs_C_idempotent : PROOF
+%|- (then (skeep) (use "idempotent_subs_subs_t") (assert))
+%|- QED
+
+subs_C_nice_idempotent: LEMMA
+    nice?(sigma) IMPLIES subs(sigma)(subs(sigma)(t)) = subs(sigma)(t)
+%|- subs_C_nice_idempotent : PROOF
+%|- (then (skeep) (use "nice_idempotent") (use "idempotent_subs_subs_t")
+%|-       (assert))
+%|- QED
+
+% extensionally equal substitutions act equally
+subs_C_equal: LEMMA
+    equal?(sigma, delta) IMPLIES subs(sigma)(t) = subs(delta)(t)
+%|- subs_C_equal : PROOF
+%|- (then (skeep) (use "equal_sub_equiv" ("delta" "sigma" "sigma" "delta"))
+%|-       (assert))
+%|- QED
+
+subs_C_equal_restricted: LEMMA
+    equal?(sigma, delta, set_vars) AND subset?(vars(t), set_vars) IMPLIES
+       subs(sigma)(t) = subs(delta)(t)
+%|- subs_C_equal_restricted : PROOF
+%|- (then (skeep) (use "equal_sub_equiv_alt" ("delta" "sigma" "sigma" "delta"))
+%|-       (assert))
+%|- QED
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%  Stability of C-equivalence  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% instances of C-equivalent C-terms are C-equivalent
+eq_C_subs: LEMMA
+    eq_C(s, t) IMPLIES eq_C(subs(sigma)(s), subs(sigma)(t))
+%|- eq_C_subs : PROOF
+%|- (spread (induct "s") ((then (typepred "s!1") (prop)) (then (skosimp*)
+%|-       (expand "eq_C" -) (replace*) (rewrite "eq_C_reflexive")) (then
+%|-       (skosimp*) (expand "eq_C" -) (replace*) (rewrite "eq_C_reflexive"))
+%|-       (then (skosimp*) (expand "eq_C" -) (replace*) (rewrite
+%|-       "eq_C_reflexive")) (then (skosimp*) (label "ih1" -1) (label "ih2" -2)
+%|-       (label "cs" -3) (label "eq" -4) (expand "C_term?" "cs") (flatten)
+%|-       (assert) (expand "eq_C" "eq") (flatten) (typepred "t!1") (inst "ih1"
+%|-       "sigma!1" "term1(t!1)") (inst "ih2" "sigma!1" "term2(t!1)") (assert)
+%|-       (lemma "first_order_term_pair_eta") (inst - "t!1") (replace -1 :dir
+%|-       rl) (hide -1) (rewrite "subs_pair") (rewrite "subs_pair") (grind
+%|-       :rewrites ("C_term_term1" "C_term_term2" "C_term_arg"
+%|-       "C_term_arg_pair"))) (then (skosimp*) (label "ih" -1) (label "cs" -2)
+%|-       (label "eq" -3) (expand "C_term?" "cs") (flatten) (assert) (expand
+%|-       "eq_C" "eq") (flatten) (typepred "t!1") (lemma
+%|-       "first_order_term_app_eta") (inst - "t!1") (replace -1 1 :dir rl)
+%|-       (hide -1) (rewrite "subs_app" 1) (rewrite "subs_app" 1) (spread (split
+%|-       -8) ((then (inst "ih" "sigma!1" "arg(t!1)") (grind :rewrites
+%|-       ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))) (then
+%|-       (flatten) (assert) (use "C_term_arg_pair" ("u" "t!1")) (assert) (inst
+%|-       "ih" "sigma!1" "pair(term2(arg(t!1)), term1(arg(t!1)))") (lemma
+%|-       "eq_C_unfold") (inst - "app2_var!1"
+%|-       "pair(term2(arg(t!1)), term1(arg(t!1)))") (replace -1) (hide -1)
+%|-       (assert) (lemma "first_order_term_pair_eta") (inst - "arg(t!1)")
+%|-       (replace -1 :dir rl) (hide -1) (lemma "first_order_term_pair_eta")
+%|-       (inst - "app2_var!1") (replace -1 :dir rl) (hide -1) (auto-rewrite
+%|-       "subs_pair") (grind :rewrites ("C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair")))))) (then (skosimp*) (use
+%|-       "subs_C_term") (assert))))
+%|- QED
+
+eq_C_subs_renaming: COROLLARY
+    eq_C(s, t) IMPLIES eq_C(subs(rho)(s), subs(rho)(t))
+%|- eq_C_subs_renaming : PROOF
+%|- (then (skosimp* :preds? t) (lemma "renaming_is_C_sub") (inst - "rho!1") (use
+%|-       "eq_C_subs" ("sigma" "rho!1")) (assert))
+%|- QED
+
+% an instance is C-equivalent to the instance of its swapped version
+eq_C_subs_swap: LEMMA
+    FORALL (t: C_term | app?(t) AND C_symbol(f_sym(t))):
+      eq_C(subs(sigma)(t), subs(sigma)(C_swap(t)))
+%|- eq_C_subs_swap : PROOF
+%|- (then (skosimp* :preds? t) (rewrite "subs_C_swap") (use "subs_C_app_head")
+%|-       (flatten) (expand "C_swap") (rewrite "eq_C_unfold") (assert) (grind
+%|-       :rewrites ("eq_C_reflexive" "C_term_term1" "C_term_term2" "C_term_arg"
+%|-       "C_term_arg_pair")))
+%|- QED
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%  C-substitutions modulo C  %%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+eq_C_sub?(sigma, delta): bool =
+    FORALL X: eq_C(subs(sigma)(X), subs(delta)(X))
+
+eq_C_sub?(sigma, delta, set_vars): bool =
+    FORALL X: member(X, set_vars) IMPLIES eq_C(subs(sigma)(X), subs(delta)(X))
+
+more_general_C?(delta, sigma): bool =
+    EXISTS gamma: eq_C_sub?(sigma, append(gamma, delta))
+
+more_general_C?(delta, sigma, set_vars): bool =
+    EXISTS gamma: eq_C_sub?(sigma, append(gamma, delta), set_vars)
+
+eq_C_sub_reflexive: LEMMA eq_C_sub?(sigma, sigma)
+%|- eq_C_sub_reflexive : PROOF
+%|- (then (skeep) (expand "eq_C_sub?") (skeep) (rewrite "eq_C_reflexive"))
+%|- QED
+
+% eq_C_sub? as an equivalence relation on C-substitutions (TRS library)
+IMPORTING TRS@relations_closure[C_sub]
+
+eq_C_sub_is_reflexive:   LEMMA reflexive?(eq_C_sub?)
+
+eq_C_sub_is_symmetric:   LEMMA symmetric?(eq_C_sub?)
+
+eq_C_sub_is_transitive:  LEMMA transitive?(eq_C_sub?)
+
+eq_C_sub_is_equivalence: LEMMA equivalence?(eq_C_sub?)
+
+equal_implies_eq_C_sub: LEMMA
+    equal?(sigma, delta) IMPLIES eq_C_sub?(sigma, delta)
+%|- equal_implies_eq_C_sub : PROOF
+%|- (then (skeep) (expand "equal?") (expand "eq_C_sub?") (skolem 1 "Y") (inst -
+%|-       "Y") (replace -1) (rewrite "eq_C_reflexive"))
+%|- QED
+
+eq_C_sub_restrict: LEMMA
+    eq_C_sub?(sigma, delta) IMPLIES eq_C_sub?(sigma, delta, set_vars)
+%|- eq_C_sub_restrict : PROOF
+%|- (grind)
+%|- QED
+
+% substitutions equal modulo C on the variables of t give C-equivalent instances of t
+eq_C_sub_subs_restricted: LEMMA
+    eq_C_sub?(sigma, delta, set_vars) AND subset?(vars(t), set_vars) IMPLIES
+       eq_C(subs(sigma)(t), subs(delta)(t))
+%|- eq_C_sub_subs_restricted : PROOF
+%|- (spread (induct "t") ((then (typepred "t!1") (prop)) (then (skosimp*)
+%|-       (auto-rewrite "subs_const" "subs_unit" "subs_pair" "subs_app"
+%|-       "eq_C_reflexive") (grind :rewrites ("C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair"))) (then (skosimp*) (auto-rewrite
+%|-       "subs_const" "subs_unit" "subs_pair" "subs_app" "eq_C_reflexive")
+%|-       (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg"
+%|-       "C_term_arg_pair"))) (then (skosimp*) (auto-rewrite "subs_const"
+%|-       "subs_unit" "subs_pair" "subs_app" "eq_C_reflexive") (grind :rewrites
+%|-       ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))) (then
+%|-       (skosimp*) (auto-rewrite "subs_const" "subs_unit" "subs_pair"
+%|-       "subs_app" "eq_C_reflexive") (grind :rewrites ("C_term_term1"
+%|-       "C_term_term2" "C_term_arg" "C_term_arg_pair"))) (then (skosimp*)
+%|-       (auto-rewrite "subs_const" "subs_unit" "subs_pair" "subs_app"
+%|-       "eq_C_reflexive") (grind :rewrites ("C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair"))) (then (skosimp* :preds? t) (use
+%|-       "subs_C_term") (assert)) (then (skosimp* :preds? t) (use
+%|-       "subs_C_term") (assert))))
+%|- QED
+
+% C-equivalent terms under substitutions equal modulo C on the variables of the
+% right-hand term give C-equivalent instances
+eq_C_and_eq_C_sub_subs_restricted: LEMMA
+    eq_C(s, t) AND eq_C_sub?(gamma, sigma, set_vars) AND subset?(vars(t), set_vars)
+       IMPLIES eq_C(subs(gamma)(s), subs(sigma)(t))
+%|- eq_C_and_eq_C_sub_subs_restricted : PROOF
+%|- (then (skeep) (lemma "eq_C_subs" ("sigma" "gamma" "s" "s" "t" "t"))
+%|-       (lemma "eq_C_sub_subs_restricted"
+%|-        ("sigma" "gamma" "delta" "sigma" "set_vars" "set_vars" "t" "t"))
+%|-       (lemma "eq_C_transitive"
+%|-        ("s" "subs(gamma)(s)" "t" "subs(gamma)(t)" "r" "subs(sigma)(t)"))
+%|-       (ground))
+%|- QED
+
+% C-equivalent terms under C-equivalent substitutions give C-equivalent instances
+eq_C_and_eq_C_sub_subs: COROLLARY
+    eq_C(s, t) AND eq_C_sub?(gamma, sigma) IMPLIES
+       eq_C(subs(gamma)(s), subs(sigma)(t))
+%|- eq_C_and_eq_C_sub_subs : PROOF
+%|- (then (skeep) (lemma "eq_C_sub_restrict"
+%|-        ("sigma" "gamma" "delta" "sigma" "set_vars" "vars(t)"))
+%|-       (lemma "eq_C_and_eq_C_sub_subs_restricted"
+%|-        ("s" "s" "t" "t" "gamma" "gamma" "sigma" "sigma" "set_vars" "vars(t)"))
+%|-       (grind))
+%|- QED
+
+% substitutions equal modulo C give C-equivalent instances
+eq_C_sub_subs: COROLLARY
+    eq_C_sub?(sigma, delta) IMPLIES eq_C(subs(sigma)(t), subs(delta)(t))
+%|- eq_C_sub_subs : PROOF
+%|- (then (skeep) (lemma "eq_C_reflexive" ("t" "t"))
+%|-       (lemma "eq_C_and_eq_C_sub_subs"
+%|-        ("s" "t" "t" "t" "gamma" "sigma" "sigma" "delta"))
+%|-       (ground))
+%|- QED
+
+% left composition preserves equality modulo C
+eq_C_sub_append_left: LEMMA
+    eq_C_sub?(sigma, delta) IMPLIES eq_C_sub?(append(gamma, sigma), append(gamma, delta))
+%|- eq_C_sub_append_left : PROOF
+%|- (then (skeep) (expand "eq_C_sub?") (skolem 1 "Y") (inst - "Y") (expand "subs"
+%|-       1) (expand "subs" -1) (rewrite "subs_append2") (rewrite
+%|-       "subs_append2") (use "eq_C_subs" ("sigma" "gamma")) (assert))
+%|- QED
+
+more_general_C_reflexive: LEMMA more_general_C?(sigma, sigma)
+%|- more_general_C_reflexive : PROOF
+%|- (then (skeep) (expand "more_general_C?") (inst 1 "null") (expand "append")
+%|-       (rewrite "eq_C_sub_reflexive") (grind))
+%|- QED
+
+more_general_implies_more_general_C: LEMMA
+    (EXISTS gamma: equal?(sigma, append(gamma, delta))) IMPLIES
+       more_general_C?(delta, sigma)
+%|- more_general_implies_more_general_C : PROOF
+%|- (then (skosimp*) (expand "more_general_C?") (inst 1 "gamma!1") (use
+%|-       "equal_implies_eq_C_sub") (assert))
+%|- QED
+
+END first_order_C_substitution

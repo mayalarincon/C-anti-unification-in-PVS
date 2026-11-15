@@ -1,0 +1,180 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%  C-equivalence of first-order C-terms (Antiunify th) %%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Equality modulo commutativity (C-equivalence) on the type C_term of
+% first_order_C_terms: the least congruence on C-terms containing
+%      f(s1, s2) =C f(s2, s1)      for every commutative symbol f.
+%
+% Since in a C-term every commutative symbol is applied to a pair, the
+% arguments of two commutative applications can always be compared
+% crosswise; no extra guards are needed in the specification.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+first_order_C_equality[(IMPORTING first_order_substitution)
+                       C_symbol: PRED[f_symbol]]: THEORY
+BEGIN
+
+IMPORTING first_order_C_terms[C_symbol]
+
+a: VAR constant
+X: VAR variable
+f: VAR f_symbol
+u: VAR first_order_term
+s, t: VAR C_term
+
+% accessors of C-terms, stated as conditional rewrite rules (used to
+% discharge the subtype TCCs of eq_C)
+C_term_term1: LEMMA C_term?(u) AND pair?(u) IMPLIES C_term?(term1(u))
+%|- C_term_term1 : PROOF
+%|- (then (skeep) (lemma "C_term_unfold") (inst - "u") (ground))
+%|- QED
+
+C_term_term2: LEMMA C_term?(u) AND pair?(u) IMPLIES C_term?(term2(u))
+%|- C_term_term2 : PROOF
+%|- (then (skeep) (lemma "C_term_unfold") (inst - "u") (ground))
+%|- QED
+
+C_term_arg: LEMMA C_term?(u) AND app?(u) IMPLIES C_term?(arg(u))
+%|- C_term_arg : PROOF
+%|- (then (skeep) (lemma "C_term_unfold") (inst - "u") (ground))
+%|- QED
+
+C_term_arg_pair: LEMMA
+    C_term?(u) AND app?(u) AND C_symbol(f_sym(u)) IMPLIES pair?(arg(u))
+%|- C_term_arg_pair : PROOF
+%|- (then (skeep) (lemma "C_term_unfold") (inst - "u") (ground))
+%|- QED
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  C-equivalence  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+eq_C(s, t): RECURSIVE bool =
+    CASES s OF
+       const(a): s = t,
+       variable(X): s = t,
+       unit: s = t,
+       pair(s1, s2): pair?(t) AND eq_C(s1, term1(t)) AND eq_C(s2, term2(t)),
+       app(f, u): app?(t) AND f = f_sym(t) AND
+                  (eq_C(u, arg(t)) OR
+                   (C_symbol(f) AND
+                    eq_C(term1(u), term2(arg(t))) AND
+                    eq_C(term2(u), term1(arg(t)))))
+    ENDCASES
+MEASURE s BY <<
+%|- eq_C_TCC1 : PROOF
+%|- (then (lemma "first_order_term_well_founded") (expand "strict_well_founded?" -1)
+%|-       (flatten) (hide -1) (expand "well_founded?") (expand "restrict") (skosimp)
+%|-       (inst -1 "LAMBDA (x: first_order_term): C_term?(x) AND p!1(x)")
+%|-       (skolem -2 "y0")
+%|-       (spread (split -1)
+%|-         ((then (skolem -1 "m") (flatten) (inst 1 "m") (skolem 1 "z") (inst -3 "z") (grind))
+%|-          (then (inst 1 "y0") (grind)))))
+%|- QED
+%|- eq_C_TCC2 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC3 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC4 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC5 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC6 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC7 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC8 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC9 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC10 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC11 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC12 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC13 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC14 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC15 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC16 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_TCC17 : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+
+% unfolding of eq_C in terms of recognizers and accessors
+eq_C_unfold: LEMMA
+    eq_C(s, t) =
+      IF pair?(s) THEN pair?(t) AND eq_C(term1(s), term1(t)) AND eq_C(term2(s), term2(t))
+      ELSIF app?(s) THEN
+         app?(t) AND f_sym(s) = f_sym(t) AND
+         (eq_C(arg(s), arg(t)) OR
+          (C_symbol(f_sym(s)) AND
+           eq_C(term1(arg(s)), term2(arg(t))) AND eq_C(term2(arg(s)), term1(arg(t)))))
+      ELSE s = t
+      ENDIF
+%|- eq_C_unfold_TCC* : PROOF
+%|- (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair"))
+%|- QED
+%|- eq_C_unfold : PROOF
+%|- (then (skeep) (expand "eq_C" 1 1) (lift-if) (ground))
+%|- QED
+
+% eq_C preserves the outermost constructor
+eq_C_same_kind: LEMMA
+    eq_C(s, t) IMPLIES
+      (const?(s) IFF const?(t)) AND (var?(s) IFF var?(t)) AND
+      (unit?(s) IFF unit?(t)) AND (pair?(s) IFF pair?(t)) AND (app?(s) IFF app?(t))
+%|- eq_C_same_kind : PROOF
+%|- (then (skeep) (rewrite "eq_C_unfold") (lift-if) (ground))
+%|- QED
+
+eq_C_reflexive: LEMMA eq_C(t, t)
+%|- eq_C_reflexive : PROOF
+%|- (then (induct "t")
+%|-       (grind :rewrites ("C_term_term1" "C_term_term2" "C_term_arg" "C_term_arg_pair")))
+%|- QED
+
+r: VAR C_term
+
+% eq_C is symmetric
+eq_C_symmetric: LEMMA eq_C(s, t) IMPLIES eq_C(t, s)
+
+% eq_C is transitive
+eq_C_transitive: LEMMA eq_C(s, t) AND eq_C(t, r) IMPLIES eq_C(s, r)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%  eq_C as an equivalence relation (TRS library)  %%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+IMPORTING TRS@relations_closure[C_term]
+
+eq_C_is_reflexive:   LEMMA reflexive?(eq_C)
+
+eq_C_is_symmetric:   LEMMA symmetric?(eq_C)
+
+eq_C_is_transitive:  LEMMA transitive?(eq_C)
+
+eq_C_is_equivalence: LEMMA equivalence?(eq_C)
+
+END first_order_C_equality

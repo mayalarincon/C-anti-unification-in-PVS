@@ -1,0 +1,2328 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%  Verification of Syntactic antiunification  %%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Mariano Miguel Moscato      AMA/NASA LaRC Formal Methods
+% Maria Julia Dias Lima       Universidade de Brasilia
+% Marcos Mercandeli Rodrigues Universidade de Brasilia
+% Temur Kutsia                RISC/Johannes Kepler Universitaet Linz
+% Thaynara Arielly de Lima    Universidade Federal de Goias
+% Mauricio Ayala-Rincon       Universidade de Brasilia
+%
+
+%    Last modified 14th November, 2026: C-terms and C-substitutions
+%    (imports first_order_C_substitution)
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+antiunif_C[(IMPORTING first_order_substitution)
+           C_symbol: PRED[f_symbol]]: THEORY
+BEGIN
+
+  IMPORTING first_order_C_substitution[C_symbol],
+            ints@max_finite_set_nat,
+            structures@more_list_props[(basic_sub)]
+
+% Finite multisets over a Noetherian order (here, naturals with >) and the
+% (Dershowitz-Manna) multiset ordering >>, used for the termination measure
+% of antiunifyC. The judgement records that > on nat satisfies the assumption
+% on the parameter of multisetsT.
+  IMPORTING TRS@noetherian[nat]
+
+  gt_nat_strict_noetherian: JUDGEMENT
+    restrict[[real, real], [nat, nat], bool](>)
+      HAS_TYPE {R: pred[[nat, nat]] | strict_order?(R) AND noetherian?(R)}
+
+% The same facts as automatic rewrite rules, used by the prover to discharge
+% the assumption on the parameter of multisetsT in proof steps.
+  gt_nat_strict_order: LEMMA strict_order?[nat](restrict[[real, real], [nat, nat], bool](>))
+
+  gt_nat_noetherian: LEMMA noetherian?[nat](restrict[[real, real], [nat, nat], bool](>))
+
+  AUTO_REWRITE+ gt_nat_strict_order, gt_nat_noetherian
+
+  IMPORTING multisetsT[nat, >]
+
+% All terms are C-terms: every commutative symbol is applied to a pair.
+  Term: TYPE+ = C_term
+
+% Substitutions in configurations and generalizers are nice C-substitutions.
+  nice_C_sub: TYPE+ = {sigma: C_sub | nice?(sigma)} CONTAINING null[basic_sub]
+
+% variables of applications and pairs
+vars_app_term : LEMMA
+  FORALL (u : first_order_term) : app?(u) IMPLIES vars(u) = vars(arg(u))
+
+vars_pair_term : LEMMA
+  FORALL (u : first_order_term) : pair?(u) IMPLIES vars(u) = union(vars(term1(u)), vars(term2(u)))
+
+% C-equivalent terms have the same variables
+eq_C_vars : LEMMA
+  FORALL (s, t : Term) : eq_C(s, t) IMPLIES vars(s) = vars(t)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Anti-unification triples (AUTs) consist of a left- and a right-hand
+% side term, and a variable label.  AUTs are the atomic elements to
+% specify anti-unification problems.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  AUT: TYPE = [# lhs, rhs : Term , label : variable #]
+
+  makeAUT(lhs, rhs : Term , label : variable): AUT
+  = (# lhs:=lhs, rhs:=rhs, label:=label #)
+
+  vars(eq: AUT): finite_set[variable]
+  = vars(eq`lhs) ∪ vars(eq`rhs)
+
+% The variables in an AUT are those occurring in its lhs and rhs terms.
+vars_AUT : LEMMA
+  FORALL (eq : AUT) : vars(eq) = union(vars(eq`lhs), vars(eq`rhs))
+
+vars_makeAUT : LEMMA
+  FORALL (l, r : Term, x : variable) : vars(makeAUT(l, r, x)) = union(vars(l), vars(r))
+
+  validAUT?(eq: AUT): bool
+  = ¬ member(eq`label, vars(eq))
+
+ size(eq: AUT): nat
+  = size(eq`lhs) + size(eq`rhs)
+
+% AUTs are classified according to the form of their lhs and rhs terms
+ match_DecF?(eq: AUT): bool
+    = LET lhs = eq`lhs, rhs = eq`rhs
+      IN  (app?(lhs) ∧ app?(rhs)) ∧ sym(lhs) = sym(rhs)
+
+% In C-terms commutative symbols are always applied to pairs, hence both
+% arguments of a commutative decomposable AUT are pairs.
+ match_DecCmmF?(eq: (match_DecF?)) : bool = C_symbol(sym(eq`lhs))
+
+ match_DecP?(eq: AUT): bool
+  = LET lhs = eq`lhs, rhs = eq`rhs
+    in pair?(lhs) ∧ pair?(rhs)
+
+ match_Synt?(eq: AUT): bool
+  = LET lhs = eq`lhs, rhs = eq`rhs
+    IN ¬app?(lhs) ∧ ¬pair?(lhs) ∧ lhs = rhs
+
+  match_Sol?(eq: AUT) : bool
+  = NOT (match_DecF?(eq) ∨ match_DecP?(eq) ∨ match_Synt?(eq))
+
+ % Classification of AUTs
+  AUT_classification : LEMMA
+    FORALL(eq: AUT) :
+       (match_DecF?(eq) ∨ match_DecP?(eq) ∨ match_Synt?(eq) ∨ match_Sol?(eq))
+    ∧  ( (match_DecF?(eq) ∧ ¬ (match_DecP?(eq) ∨ match_Synt?(eq) ∨ match_Sol?(eq)) ) ∨
+         (match_DecP?(eq) ∧ ¬ (match_DecF?(eq) ∨ match_Synt?(eq) ∨ match_Sol?(eq))) ∨
+	  (match_Synt?(eq) ∧ ¬ (match_DecF?(eq) ∨ match_DecP?(eq) ∨ match_Sol?(eq))) ∨
+	   (match_Sol?(eq) ∧ ¬ (match_DecF?(eq) ∨ match_DecP?(eq) ∨ match_Synt?(eq))) )
+	   
+% Being in solved form depends only on the lhs and rhs terms of an AUT
+match_Sol_same_sides : LEMMA
+  FORALL (eq1, eq2 : AUT) :
+    eq1`lhs = eq2`lhs AND eq1`rhs = eq2`rhs IMPLIES (match_Sol?(eq1) IFF match_Sol?(eq2))
+
+  vars(leq: list[AUT]): RECURSIVE finite_set[variable]
+  = if null?(leq) then ∅
+    else vars(car(leq)) ∪ vars(cdr(leq)) endif
+    measure leq by <<
+
+  vars_in_append_List_AUT :   LEMMA
+      FORALL (leq1, leq2: list[AUT])  : vars(append(leq1,leq2)) = union(vars(leq1), vars(leq2))
+
+  subset_vars_AUT_AUTs : LEMMA 
+    FORALL (leq : list[AUT], eq : AUT) :
+       member(eq, leq) IMPLIES subset?(vars(eq), vars(leq))
+
+AUTs_vars_AUT_this_vars: LEMMA
+   FORALL(leq: list[AUT], ve: variable):
+      member(ve, vars(leq)) IMPLIES
+         EXISTS(eq: AUT):
+	    member(eq, leq) AND
+	       member(ve, vars(eq))
+
+  labels(leq: list[AUT]): RECURSIVE finite_set[variable]
+  = if null?(leq) then ∅
+    else add(car(leq)`label, labels(cdr(leq))) endif
+    measure leq by <<
+
+  AUT_member_AUT_label_in_labels : LEMMA  
+  FORALL(leq:list[AUT], eq:AUT) : member(eq, leq) IMPLIES member(eq`label, labels(leq))
+
+  AUTs_label_AUT_this_label : LEMMA
+  FORALL(leq:list[AUT], lbl:variable) :  member(lbl, labels(leq)) IMPLIES
+        EXISTS (eq:AUT) : member(eq, leq) AND eq`label = lbl 
+  
+  card_lbls_in_List_AUT : LEMMA FORALL(leq:list[AUT]) :  card(labels(leq)) <= length(leq)
+
+  append_labels_is_union_labels : LEMMA
+  FORALL (leq1, leq2 : list[AUT]) : labels(append(leq1, leq2)) = union(labels(leq1), labels(leq2))
+
+  labels_cons : LEMMA
+  FORALL (eq : AUT, leq : list[AUT]) : labels(cons(eq, leq)) = add(eq`label, labels(leq))
+
+  vars_cons : LEMMA
+  FORALL (eq : AUT, leq : list[AUT]) : vars(cons(eq, leq)) = vars(eq) ∪ vars(leq)
+
+% Members of the tail of a list of AUTs are members of the list
+member_cdr_AUT : LEMMA
+  FORALL (leq : list[AUT], eq : AUT) :
+    cons?(leq) AND member(eq, cdr(leq)) IMPLIES member(eq, leq)
+
+  valid_AUTs?(leq: list[AUT]): bool
+    = empty?(vars(leq) ∩ labels(leq)) ∧ card(labels(leq)) = length(leq)
+
+disjoint_valid_append_valid_AUTs : LEMMA
+FORALL (leq1, leq2 : list[AUT]) : valid_AUTs?(append(leq1,leq2)) IMPLIES disjoint?(labels(leq1), labels(leq2))
+
+non_member_label_valid_AUTs :  LEMMA
+FORALL (leq: (valid_AUTs?) | cons?(leq))  : NOT member(car(leq)`label, labels(cdr(leq)))
+
+validity_cdr_valid_AUTs  : LEMMA  
+FORALL (leq: (valid_AUTs?) | cons?(leq)) : valid_AUTs?(cdr(leq))
+
+validity_AUT_in_valid_AUTs  : LEMMA   
+FORALL (leq: (valid_AUTs?), i : below[length(leq)]) : validAUT?(nth(leq,i))
+
+non_member_var_nth_label: LEMMA
+FORALL (leq: (valid_AUTs?), i: below[length(leq)], v: variable): NOT member(v, labels(leq)) IMPLIES v /= label(nth(leq,i)) 
+
+% members of a valid list of AUTs are valid AUTs
+validity_member_valid_AUTs : LEMMA
+FORALL (leq: (valid_AUTs?), eq : AUT) : member(eq, leq) IMPLIES validAUT?(eq)
+
+validity_append_valid_AUTs: LEMMA
+ FORALL (leq1,leq2: list[AUT]): valid_AUTs?(append(leq1,leq2)) IMPLIES valid_AUTs?(leq1) AND valid_AUTs?(leq2)
+
+validity_label_unicity_eq: LEMMA 
+FORALL (leq: (valid_AUTs?), (eq1 : AUT | member(eq1,leq)), (eq2 : AUT | member(eq2, leq) )) : eq1`label = eq2`label IMPLIES eq1 = eq2 
+
+  size(leq: list[AUT]): nat
+  = sum(map(size)(leq))
+
+  size_cons_List_AUT: LEMMA
+    FORALL (eq: AUT, leq: list[AUT]): size(cons(eq, leq)) = size(eq) + size(leq)
+
+
+recursive_valid_AUTs?(leq: list[AUT]): RECURSIVE bool =
+   CASES leq OF
+      null: TRUE,
+      cons(eq, leq_tl):
+         validAUT?(eq) AND
+	    NOT member(eq`label, labels(leq_tl)) AND
+	       NOT member(eq`label, vars(leq_tl)) AND
+	          disjoint?(vars(eq), labels(leq_tl)) AND
+	             recursive_valid_AUTs?(leq_tl)
+   ENDCASES
+MEASURE leq BY <<
+
+recursive_valid_AUTs_if: LEMMA
+   subset?(valid_AUTs?, recursive_valid_AUTs?)
+
+recursive_valid_AUTs_fi: LEMMA
+   subset?(recursive_valid_AUTs?, valid_AUTs?)
+
+recursive_valid_AUTs_equivalence: COROLLARY
+   valid_AUTs? = recursive_valid_AUTs?
+
+suffix_AUTs_preserves_labels_and_vars: LEMMA
+   FORALL(leq, leq_sfx: list[AUT]):
+      suffix?(leq_sfx, leq) IMPLIES
+         subset?(labels(leq_sfx), labels(leq)) AND
+	    subset?(vars(leq_sfx), vars(leq))
+
+  %%%%%%%%%%%%%%%%%%%%
+  %%%  Classification of list of AUT is given by the %%%  calssification of their head AUT.
+  
+  match_DecF?(leq: list[AUT]): bool
+    = cons?(leq) ∧  match_DecF?(car(leq))
+    
+  match_DecCmmF?(leq: list[AUT]) : bool
+   = cons?(leq) ∧ match_DecF?(car(leq)) ∧ match_DecCmmF?(car(leq))
+   
+  match_DecP?(leq: list[AUT]): bool
+  = cons?(leq) ∧ match_DecP?(car(leq))
+
+  match_Synt?(leq: list[AUT]): bool
+  = cons?(leq) ∧ match_Synt?(car(leq))
+  
+  match_Sol?(leq: list[AUT]) : bool
+  = cons?(leq) ∧ match_Sol?(car(leq))
+
+% Definition of repeated AUTs - Notice that here we use eq_C. 
+  repeated_AUT?(eq1,eq2 :  AUT) : bool =
+    eq_C(eq1`lhs,eq2`lhs) ∧ eq_C(eq1`rhs,eq2`rhs)
+    
+  AUT_repeated_in?(eq: AUT, leq: list[AUT]) :  RECURSIVE bool
+   =  cons?(leq) ∧
+    ( repeated_AUT?(eq,car(leq)) ∨ AUT_repeated_in?(eq, cdr(leq)) )
+  MEASURE leq by <<
+
+  first_AUT_repeated?(leq:list[AUT]) :  bool
+    = cons?(leq) ∧ AUT_repeated_in?(car(leq),cdr(leq))
+
+  cdr_first_AUT_repeated: LEMMA
+  FORALL (leq: (first_AUT_repeated?)): cons?(cdr(leq))
+
+% Selection of the second occurrence of a head repeated equation in a list
+  rep_AUT_in(leq: (first_AUT_repeated?)) : RECURSIVE AUT =
+    IF repeated_AUT?(car(leq), car(cdr(leq))) 
+    THEN car(cdr(leq))
+    ELSE rep_AUT_in(cons(car(leq), cdr(cdr(leq))))
+    ENDIF
+    MEASURE length(leq)
+
+% The head of the list is repeated (modulo C) by its selected repetition
+  rep_AUT_in_repeated : LEMMA
+    FORALL (leq: (first_AUT_repeated?)) : repeated_AUT?(car(leq), rep_AUT_in(leq))
+
+  repeated_AUT_correct : LEMMA
+    FORALL (leq: (first_AUT_repeated?)) :
+      eq_C(rep_AUT_in(leq)`lhs, car(leq)`lhs) AND eq_C(rep_AUT_in(leq)`rhs, car(leq)`rhs)
+
+  rep_AUT_in_cdr : LEMMA
+     FORALL (leq: (first_AUT_repeated?)) : member(rep_AUT_in(leq),cdr(leq))
+
+  nonrepeated?(leq: list[AUT]) : RECURSIVE bool  =
+    length(leq) <= 1 ∨ 
+    ( NOT first_AUT_repeated?(leq) ∧ nonrepeated?(cdr(leq)))
+    MEASURE leq by << 
+
+  allSolvedAUTs?(leq: list[AUT])  : RECURSIVE bool =
+    null?(leq) ∨ (match_Sol?(car(leq)) ∧ allSolvedAUTs?(cdr(leq)))
+    MEASURE leq by <<
+
+% List of valid solved equations:  all equations are solved and not repeated.
+  validSolvedAUTs?(leq: list[AUT]) : bool =
+   allSolvedAUTs?(leq) ∧ nonrepeated?(leq)
+
+% AUTs of a list of solved AUTs are in solved form
+allSolvedAUTs_member : LEMMA
+  FORALL (leq : list[AUT], eq : AUT) :
+    allSolvedAUTs?(leq) AND member(eq, leq) IMPLIES match_Sol?(eq)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Generalizers and substitutions built from lists of AUTs
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Definition of substitution generalizer of an AUT 
+ generalizer?(eq: (validAUT?), sigma, rho, delta: nice_C_sub) : bool =
+   subs(append(rho,sigma))(eq`label) = eq`lhs AND
+   subs(append(delta,sigma))(eq`label) = eq`rhs
+
+% Definition of substitution generalizer of a list of AUTs 
+ generalizer?(leq : (valid_AUTs?), sigma, rho, delta: nice_C_sub) : bool =
+  FORALL (eq : (validAUT?)) : member(eq, leq) IMPLIES
+        generalizer?(eq, sigma, rho, delta)
+
+ generalizer_C?(eq: (validAUT?), sigma, rho, delta: nice_C_sub) : bool =
+   eq_C(subs(append(rho,sigma))(eq`label), eq`lhs) AND
+   eq_C(subs(append(delta,sigma))(eq`label), eq`rhs)
+
+% Definition of substitution generalizer of a list of AUTs 
+ generalizer_C?(leq : (valid_AUTs?), sigma, rho, delta: nice_C_sub) : bool =
+  FORALL (eq : (validAUT?)) : member(eq, leq) IMPLIES
+        generalizer_C?(eq, sigma, rho, delta)
+
+% Construction of the left-hand side substitution from a list of AUTs
+build_subs_left(leq : (valid_AUTs?)) : RECURSIVE C_sub =
+  IF null?(leq) THEN null
+  ELSE LET aut = car(leq) IN
+       cons((aut`label, aut`lhs), build_subs_left(cdr(leq)))
+  ENDIF
+MEASURE length(leq)
+
+super_domain_subs_left: LEMMA
+           FORALL (leq : (valid_AUTs?)) :  supset_dom(build_subs_left(leq)) = labels(leq)
+
+domain_subs_left: COROLLARY
+           FORALL (leq : (valid_AUTs?)): subset?(dom(build_subs_left(leq)), labels(leq))
+
+nice_subs_left: LEMMA
+FORALL (leq : (valid_AUTs?)) : nice?(build_subs_left(leq))
+
+% the left-hand side substitution is a nice C-substitution
+nice_C_subs_left: JUDGEMENT build_subs_left(leq : (valid_AUTs?)) HAS_TYPE nice_C_sub
+
+% Construction of the right-hand side substitution from a list of AUTs
+build_subs_right(leq :  (valid_AUTs?)) : RECURSIVE C_sub =
+  IF null?(leq) THEN null
+  ELSE LET aut = car(leq) IN
+       cons((aut`label, aut`rhs), build_subs_right(cdr(leq)))
+  ENDIF
+MEASURE length(leq)
+
+super_domain_subs_right: LEMMA
+           FORALL (leq : (valid_AUTs?)) :  supset_dom(build_subs_right(leq)) = labels(leq)
+
+domain_subs_right: COROLLARY FORALL (leq : (valid_AUTs?)):    
+   subset?(dom(build_subs_right(leq)), labels(leq))
+
+nice_subs_right: LEMMA
+FORALL (leq : (valid_AUTs?)) : nice?(build_subs_right(leq))
+
+% the right-hand side substitution is a nice C-substitution
+nice_C_subs_right: JUDGEMENT build_subs_right(leq : (valid_AUTs?)) HAS_TYPE nice_C_sub
+
+images_of_build_subs_left_right : LEMMA FORALL(leq : (valid_AUTs?), eq: AUT) :
+    member(eq,leq) IMPLIES
+              LET rho_l = build_subs_left(leq),
+	          rho_r = build_subs_right(leq) IN
+		           subs(rho_l)(eq`label) = eq`lhs AND 
+                           subs(rho_r)(eq`label) = eq`rhs
+
+% A generalizer modulo C of a list of AUTs is characterized by the equality
+% modulo C (on the labels of the AUTs) of the composed substitutions with
+% the left- and right-hand side substitutions built from the AUTs.
+generalizer_C_iff_eq_C_sub : LEMMA
+  FORALL (leq : (valid_AUTs?), sigma, rho, delta : nice_C_sub) :
+    generalizer_C?(leq, sigma, rho, delta) IFF
+      (eq_C_sub?(append(rho, sigma), build_subs_left(leq), labels(leq)) AND
+       eq_C_sub?(append(delta, sigma), build_subs_right(leq), labels(leq)))
+
+domain_subs_left_equality: LEMMA
+   FORALL (leq: (valid_AUTs?)):
+      dom(build_subs_left(leq)) = labels(leq)
+
+domain_subs_right_equality: LEMMA
+   FORALL (leq: (valid_AUTs?)):
+      dom(build_subs_right(leq)) = labels(leq)
+
+vars_img_subs_left_right_equality: LEMMA
+   FORALL (leq: (valid_AUTs?)):
+      union(vars(img(build_subs_left(leq))), vars(img(build_subs_right(leq)))) = vars(leq)
+
+append_build_subs_left_first_list_append: LEMMA
+   FORALL (leq1, leq2: list[AUT], eq: AUT | member(eq, leq1)):
+      valid_AUTs?(append[AUT](leq1, leq2)) IMPLIES
+         subs(build_subs_left(append(leq1, leq2)))(eq`label) = subs(build_subs_left(leq1))(eq`label)
+
+append_build_subs_left_second_list_append: LEMMA
+   FORALL (leq1, leq2: list[AUT], eq: AUT | member(eq, leq2)):
+      valid_AUTs?(append[AUT](leq1, leq2)) IMPLIES
+         subs(build_subs_left(append(leq1, leq2)))(eq`label) = subs(build_subs_left(leq2))(eq`label)
+
+append_build_subs_right_first_list_append: LEMMA
+   FORALL (leq1, leq2: list[AUT], eq: AUT | member(eq, leq1)):
+      valid_AUTs?(append[AUT](leq1, leq2)) IMPLIES
+         subs(build_subs_right(append(leq1, leq2)))(eq`label) = subs(build_subs_right(leq1))(eq`label)
+
+append_build_subs_right_second_list_append: LEMMA
+   FORALL (leq1, leq2: list[AUT], eq: AUT | member(eq, leq2)):
+      valid_AUTs?(append[AUT](leq1, leq2)) IMPLIES
+         subs(build_subs_right(append(leq1, leq2)))(eq`label) = subs(build_subs_right(leq2))(eq`label)
+
+append_build_subs_left_append_subs: LEMMA
+   FORALL (leq1, leq2: list[AUT]):
+      valid_AUTs?(append[AUT](leq1, leq2)) IMPLIES
+         build_subs_left(append(leq1, leq2)) = append(build_subs_left(leq1), build_subs_left(leq2))
+
+append_build_subs_right_append_subs: LEMMA
+   FORALL (leq1, leq2: list[AUT]):
+      valid_AUTs?(append[AUT](leq1, leq2)) IMPLIES
+         build_subs_right(append(leq1, leq2)) = append(build_subs_right(leq1), build_subs_right(leq2))
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Configurations
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  Configuration: TYPE = [# unsolved, solved: list[AUT], substitution: nice_C_sub #]
+
+  size(c: Configuration): nat
+  = size(c`unsolved) + size(c`solved)
+
+% Definition of valid configuration
+  validConfiguration?(c: Configuration): bool
+  = LET allAUTs = append(c`unsolved, c`solved)
+    in valid_AUTs?(allAUTs) ∧ empty?(supset_dom(c`substitution) ∩ labels(allAUTs)) ∧ 
+        validSolvedAUTs?(c`solved) ∧ empty?(supset_dom(c`substitution) ∩ vars(allAUTs))
+
+  disjoint_labels_unsolved_solved : COROLLARY
+    FORALL (c: (validConfiguration?)) : disjoint?(labels(c`unsolved), labels(c`solved))
+
+  validity_car_conf_unsolved  : COROLLARY
+   FORALL (c: (validConfiguration?)| cons?(c`unsolved)) : validAUT?(car(c`unsolved))
+
+  validity_cdr_conf_unsolved  : COROLLARY 
+    FORALL (c: (validConfiguration?)| cons?(c`unsolved), eq: AUT ) : member(eq, cdr(c`unsolved)) IMPLIES
+   	      			     			                   validAUT?(eq)
+
+% No label belongs to the domain of the substitution in a valid configuration.
+  invariance_labels_in_validConf  : LEMMA
+     FORALL (c : (validConfiguration?))  :
+        LET allAUTs = append(c`unsolved, c`solved) IN
+             FORALL (l : (labels(allAUTs)) ):
+	       subs(c`substitution)(variable(l)) = variable(l)
+
+  cdr_is_validConf  :  LEMMA
+     FORALL (c : (validConfiguration?) | cons?(c`unsolved) ) :
+        validConfiguration?(c with [unsolved := cdr(c`unsolved)])
+
+ labels_allAUTs_as_union: LEMMA
+    FORALL (c: (validConfiguration?)):
+     labels(append(c`unsolved, c`solved)) = union(labels(c`unsolved),labels(c`solved))
+
+% Set of variables (labels and variables) in a configuration  
+  vars(c :(validConfiguration?)) : finite_set[variable] =
+    LET allAUTs = append(c`unsolved, c`solved)  IN
+      union(union(vars(allAUTs), labels(allAUTs)), 
+          union(supset_dom(c`substitution), vars(img(c`substitution))))
+
+% Labels of the AUTs of a configuration are variables of the configuration
+AUT_label_in_vars_conf : LEMMA
+  FORALL (c : (validConfiguration?), eq : AUT) :
+    (member(eq, c`unsolved) OR member(eq, c`solved)) IMPLIES member(eq`label, vars(c))
+
+% Labels of the AUTs and the superset of the domain of the substitution of
+% the configuration c are kept in the configuration n
+keep_lbls?(c, n : (validConfiguration?)) : bool =
+  FORALL (x : variable) :
+    (member(x, labels(append(c`unsolved, c`solved))) OR member(x, supset_dom(c`substitution)))
+    IMPLIES
+    (member(x, labels(append(n`unsolved, n`solved))) OR member(x, supset_dom(n`substitution)))
+
+% Relations between configurations and auxiliary facts
+
+% A configuration is normal when its unsolved part is empty
+ normal_configuration?(c : (validConfiguration?)) : bool = null?(c`unsolved)
+
+% the label of an AUT of a configuration is a label of its AUTs
+label_in_conf : LEMMA
+  FORALL (c : Configuration, eq : AUT) :
+    (member(eq, c`unsolved) OR member(eq, c`solved)) IMPLIES
+      member(eq`label, labels(append(c`unsolved, c`solved)))
+
+% The unsolved labels of n are unsolved labels of c or labels fresh for c
+lbls_new?(c, n : (validConfiguration?)) : bool =
+  FORALL (x : variable) : member(x, labels(n`unsolved)) IMPLIES
+    (member(x, labels(c`unsolved)) OR NOT member(x, vars(c)))
+
+% The variables of c that are not unsolved labels of c are variables of n
+vars_kept?(c, n : (validConfiguration?)) : bool =
+  FORALL (y : variable) :
+    member(y, vars(c)) AND NOT member(y, labels(c`unsolved)) IMPLIES member(y, vars(n))
+
+% sufficient conditions for vars_kept?
+vars_kept_suff : LEMMA
+  FORALL (c : (validConfiguration?) | cons?(c`unsolved), n : (validConfiguration?)) :
+    subset?(labels(c`solved), labels(n`solved)) AND
+    subset?(vars(c`solved), vars(n`solved)) AND
+    subset?(vars(cdr(c`unsolved)), vars(n`unsolved)) AND
+    subset?(vars(car(c`unsolved)),
+            union(union(vars(n`unsolved), vars(n`solved)), vars(img(n`substitution)))) AND
+    (n`substitution = c`substitution OR
+     EXISTS (t : first_order_term) :
+       n`substitution = cons((car(c`unsolved)`label, t), c`substitution))
+    IMPLIES vars_kept?(c, n)
+
+% The labels of the solved AUTs of n are labels of AUTs of c
+sol_lbls?(c, n : (validConfiguration?)) : bool =
+  FORALL (x : variable) : member(x, labels(n`solved)) IMPLIES
+    member(x, labels(append(c`unsolved, c`solved)))
+
+% A set V of variables of c that are not unsolved labels of c keeps these
+% properties in a new configuration n
+desc_inv_step : LEMMA
+  FORALL (c, n : (validConfiguration?), V : finite_set[variable]) :
+    lbls_new?(c, n) AND vars_kept?(c, n) AND
+    subset?(V, vars(c)) AND disjoint?(V, labels(c`unsolved))
+    IMPLIES
+    subset?(V, vars(n)) AND disjoint?(V, labels(n`unsolved))
+
+% if the substitution of n is that of c, possibly extended at the head by a
+% binding, then a substitution that decomposes through n decomposes through c
+sub_prefix_step : LEMMA
+  FORALL (c, n, nc : (validConfiguration?), theta1 : nice_C_sub) :
+    (n`substitution = c`substitution OR
+     EXISTS (X : variable, t : first_order_term) :
+       n`substitution = cons((X, t), c`substitution)) AND
+    nc`substitution = append(theta1, n`substitution)
+    IMPLIES
+    EXISTS (theta : nice_C_sub) : nc`substitution = append(theta, c`substitution)
+
+% extending a substitution at the head by a binding of a nice C-substitution
+% gives a nice C-substitution prefix
+prefix_cons_nice_C : LEMMA
+  FORALL (n, nc : (validConfiguration?), theta1 : nice_C_sub, X : variable,
+          t : first_order_term, s : sub) :
+    n`substitution = cons((X, t), s) AND nc`substitution = append(theta1, n`substitution)
+    IMPLIES
+    C_sub?(append(theta1, cons((X, t), null))) AND nice?(append(theta1, cons((X, t), null)))
+
+% c is an ancestor of the configuration nc
+ancestor?(c, nc : (validConfiguration?)) : bool =
+  EXISTS (theta : nice_C_sub) :
+    nc`substitution = append(theta, c`substitution) AND
+    disjoint?(supset_dom(theta), difference(vars(c), labels(c`unsolved))) AND
+    (FORALL (x : variable) : member(x, labels(nc`solved)) IMPLIES
+       (member(x, labels(append(c`unsolved, c`solved))) OR NOT member(x, vars(c)))) AND
+    (FORALL (eq : AUT) : member(eq, c`solved) IMPLIES member(eq, nc`solved))
+
+ancestor_refl : LEMMA
+  FORALL (c : (validConfiguration?)) : ancestor?(c, c)
+
+% The final configuration nc generalizes (modulo C) the AUTs of c through its
+% substitution and the left- and right-hand side substitutions of its solved part
+gen_conf?(c, nc : (validConfiguration?)) : bool =
+  FORALL (eq : AUT) : (member(eq, c`unsolved) OR member(eq, c`solved)) IMPLIES
+    eq_C(subs(append(build_subs_left(nc`solved), nc`substitution))(eq`label), eq`lhs) AND
+    eq_C(subs(append(build_subs_right(nc`solved), nc`substitution))(eq`label), eq`rhs)
+
+% generalization of the AUTs of c from that of the AUTs of n and of the first AUT of c
+gen_conf_step : LEMMA
+  FORALL (c : (validConfiguration?) | cons?(c`unsolved), n, nc : (validConfiguration?)) :
+    (FORALL (eq : AUT) :
+       (member(eq, c`unsolved) OR member(eq, c`solved)) AND eq /= car(c`unsolved) IMPLIES
+         (member(eq, n`unsolved) OR member(eq, n`solved))) AND
+    gen_conf?(n, nc) AND
+    eq_C(subs(append(build_subs_left(nc`solved), nc`substitution))(car(c`unsolved)`label),
+         car(c`unsolved)`lhs) AND
+    eq_C(subs(append(build_subs_right(nc`solved), nc`substitution))(car(c`unsolved)`label),
+         car(c`unsolved)`rhs)
+    IMPLIES gen_conf?(c, nc)
+
+% a label bound at the head of n is mapped by an extension of the substitution of n
+% as the term it is bound to
+subs_bind : LEMMA
+  FORALL (n, nc : (validConfiguration?), theta1 : nice_C_sub, X : variable,
+          t : first_order_term, s : sub) :
+    n`substitution = cons((X, t), s) AND nc`substitution = append(theta1, n`substitution)
+    IMPLIES subs(nc`substitution)(X) = subs(nc`substitution)(t)
+
+% a term fixed by the substitution of n whose variables are variables of n other
+% than labels of AUTs of n is fixed by the final substitutions of a configuration
+% of which n is an ancestor
+term_fixed : LEMMA
+  FORALL (n, nc : (validConfiguration?), theta1 : nice_C_sub, u : first_order_term) :
+    nc`substitution = append(theta1, n`substitution) AND
+    disjoint?(supset_dom(theta1), difference(vars(n), labels(n`unsolved))) AND
+    (FORALL (x : variable) : member(x, labels(nc`solved)) IMPLIES
+       (member(x, labels(append(n`unsolved, n`solved))) OR NOT member(x, vars(n)))) AND
+    subset?(vars(u), vars(n)) AND disjoint?(vars(u), labels(append(n`unsolved, n`solved))) AND
+    subs(n`substitution)(u) = u
+    IMPLIES
+    subs(append(build_subs_left(nc`solved), nc`substitution))(u) = u AND
+    subs(append(build_subs_right(nc`solved), nc`substitution))(u) = u
+
+  freshLabel(V : setof[variable]) : variable =
+     freshVar(V)
+   % epsilon((lambda(v:variable): NOT member(v,V)))
+
+% Construction of fresh variables using the PVS epsilon function
+  freshLabel(c:(validConfiguration?)): variable =
+    freshLabel(vars(c))
+
+  freshLabel(c:(validConfiguration?),V : finite_set[variable]): variable =
+    freshLabel(union(vars(c),V)) 
+
+  freshness_membship : LEMMA
+      FORALL (V : finite_set[variable]) : NOT member(freshLabel(V),V)
+
+  freshness_epsilon_ext : COROLLARY
+      FORALL (c:(validConfiguration?),V : finite_set[variable]) : NOT member(freshLabel(c,V), union(vars(c),V))
+
+  freshness_epsilon : COROLLARY FORALL (c:(validConfiguration?)) : NOT member(freshLabel(c),vars(c))
+
+  freshness_labels :  COROLLARY FORALL (c:(validConfiguration?)) :
+               NOT member(freshLabel(c), labels(append(c`unsolved,c`solved)))
+
+ freshness_nth_label : LEMMA FORALL (c:(validConfiguration?), i : below[length(c`unsolved) + length(c`solved)]) :
+       NOT freshLabel(c) = (nth(append(c`unsolved, c`solved),i))`label
+
+  freshness_car_label : COROLLARY FORALL (c:(validConfiguration?)| cons?(c`unsolved)) :
+       NOT freshLabel(c) = label(car(c`unsolved))
+
+  freshness_labels_ext :  COROLLARY FORALL (c:(validConfiguration?),V : finite_set[variable]) :
+               NOT member(freshLabel(c,V), labels(append(c`unsolved,c`solved)))
+
+  freshness_subs_ext : COROLLARY FORALL (c:(validConfiguration?), V : finite_set[variable]) :
+               NOT member(freshLabel(c,V), union(supset_dom(c`substitution), vars(img(c`substitution))))
+
+  freshness_subs_dom_ext: COROLLARY FORALL (c:(validConfiguration?), V : finite_set[variable]) :
+               NOT member(freshLabel(c,V), dom(c`substitution))
+
+  car_lbl_fresh_in_cdr :  LEMMA FORALL (c:(validConfiguration?) | cons?(c`unsolved) ) :
+               NOT member(label(car(c`unsolved)), labels(append(cdr(c`unsolved),c`solved)))
+
+  car_lbl_fresh_dom: LEMMA FORALL (c:(validConfiguration?) | cons?(c`unsolved) ) :
+               NOT member(label(car(c`unsolved)), dom(c`substitution))
+
+  emptyness_conf_vars_with_lbls_and_fresh_variables: LEMMA FORALL (c:(validConfiguration?) | cons?(c`unsolved), set_lbl : finite_set[variable]):
+  	     (FORALL (lbl:variable) : member(lbl,set_lbl) IMPLIES NOT member(lbl,vars(c))) IMPLIES
+	      empty?(intersection(vars(append(c`unsolved, c`solved)),
+	             union(set_lbl, labels(append(cdr(c`unsolved), c`solved)))))
+
+  emptyness_conf_supdom_with_lbls_and_fresh_variables: LEMMA
+    FORALL (c:(validConfiguration?) | cons?(c`unsolved), set_lbl : finite_set[variable]):
+    (FORALL (lbl:variable) : member(lbl,set_lbl) IMPLIES NOT member(lbl,vars(c))) IMPLIES
+     empty?(intersection(supset_dom(c`substitution), union(set_lbl,labels(append(cdr(c`unsolved),c`solved)))))
+
+  emptyness_conf_supdom_with_car_lbls_and_fresh_variables: LEMMA
+    FORALL (c:(validConfiguration?) | cons?(c`unsolved), set_lbl : finite_set[variable]):
+    LET eq = car(c`unsolved) IN
+    (FORALL (lbl:variable) : member(lbl,set_lbl) IMPLIES NOT member(lbl,vars(c))) IMPLIES
+     empty?(intersection(union(singleton(eq`label), supset_dom(c`substitution)), union(set_lbl,labels(append(cdr(c`unsolved),c`solved)))))
+
+ emptyness_conf_var: COROLLARY FORALL (c:(validConfiguration?) | cons?(c`unsolved)):
+	     empty?(intersection(vars(append(c`unsolved, c`solved)), (labels(append(cdr(c`unsolved), c`solved)))))
+
+  niceness_preserv_conditions: LEMMA
+  FORALL (c:(validConfiguration?) | cons?(c`unsolved), set_lbl : finite_set[variable]):
+    LET eq = car(c`unsolved) IN
+    (FORALL (lbl:variable) : member(lbl,set_lbl) IMPLIES NOT member(lbl,vars(c))) IMPLIES
+     (NOT member(eq`label, union(set_lbl, supset_dom(c`substitution))) AND
+      empty?(intersection(set_lbl,
+                          union(supset_dom(c`substitution), vars(img(c`substitution))))))
+
+% Building new configurations by replacing the first unsolved AUT
+
+% binding the label of the first AUT to a term built with fresh labels preserves niceness
+nice_sub_fresh : LEMMA
+  FORALL (c : (validConfiguration?) | cons?(c`unsolved), set_lbl : finite_set[variable],
+          t : first_order_term) :
+    (FORALL (lbl : variable) : member(lbl, set_lbl) IMPLIES NOT member(lbl, vars(c))) AND
+    subset?(vars(t), set_lbl) IMPLIES
+      nice?(cons((car(c`unsolved)`label, t), c`substitution))
+
+% replacing the first unsolved AUT by an AUT with a fresh label and variables
+% of the configuration, and binding the label of the first AUT, preserves validity
+valid_conf_replace_car_AUT : LEMMA
+  FORALL (c : (validConfiguration?) | cons?(c`unsolved), eq : AUT, s : nice_C_sub) :
+    LET allAUTs = append(c`unsolved, c`solved) IN
+    subset?(vars(eq), vars(allAUTs)) AND
+    NOT member(eq`label, vars(allAUTs)) AND
+    NOT member(eq`label, labels(allAUTs)) AND
+    NOT member(eq`label, supset_dom(c`substitution)) AND
+    supset_dom(s) = add(car(c`unsolved)`label, supset_dom(c`substitution))
+    IMPLIES
+      validConfiguration?(c WITH [unsolved := cons(eq, cdr(c`unsolved)), substitution := s])
+
+% replacing the first unsolved AUT by two AUTs with distinct fresh labels and variables
+% of the configuration, and binding the label of the first AUT, preserves validity
+valid_conf_replace_car_two_AUTs : LEMMA
+  FORALL (c : (validConfiguration?) | cons?(c`unsolved), eq1, eq2 : AUT, s : nice_C_sub) :
+    LET allAUTs = append(c`unsolved, c`solved) IN
+    subset?(vars(eq1), vars(allAUTs)) AND
+    subset?(vars(eq2), vars(allAUTs)) AND
+    eq1`label /= eq2`label AND
+    NOT member(eq1`label, vars(allAUTs)) AND
+    NOT member(eq2`label, vars(allAUTs)) AND
+    NOT member(eq1`label, labels(allAUTs)) AND
+    NOT member(eq2`label, labels(allAUTs)) AND
+    NOT member(eq1`label, supset_dom(c`substitution)) AND
+    NOT member(eq2`label, supset_dom(c`substitution)) AND
+    supset_dom(s) = add(car(c`unsolved)`label, supset_dom(c`substitution))
+    IMPLIES
+      validConfiguration?(c WITH [unsolved := cons(eq1, cons(eq2, cdr(c`unsolved))), substitution := s])
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Lists of configurations
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+qs_normal_conf : TYPE = { c : (validConfiguration?) | null?(c`unsolved)} 
+
+% Labels of the solved AUTs of all configurations in a list
+solved_lbls(lc : list[(validConfiguration?)]) : RECURSIVE finite_set[variable] =
+IF null?(lc) THEN emptyset ELSE union(labels(car(lc)`solved), solved_lbls(cdr(lc))) ENDIF
+MEASURE lc by <<
+
+% Union of the domains of the substitutions of all normal configurations in a list
+domain_subs(lnc : list[qs_normal_conf]) : RECURSIVE finite_set[variable] =
+IF null?(lnc) THEN emptyset ELSE union(dom(car(lnc)`substitution), domain_subs(cdr(lnc))) ENDIF
+MEASURE lnc by <<
+
+domain_Allsubs(lc : list[(validConfiguration?)]) : RECURSIVE finite_set[variable] =
+IF null?(lc) THEN emptyset ELSE union(dom(car(lc)`substitution), domain_Allsubs(cdr(lc))) ENDIF
+MEASURE lc by <<
+
+% Union of the sets of AUTs in the unsolved and solved parts of all
+% configurations in a list
+all_AUTs(lc : list[Configuration]) : RECURSIVE set[AUT] =
+IF null?(lc) THEN emptyset
+ELSE union({eq : AUT | member(eq, car(lc)`unsolved) OR member(eq, car(lc)`solved)},
+           all_AUTs(cdr(lc))) ENDIF
+MEASURE lc by <<
+
+% Membership in the set of AUTs of a nonempty list of configurations
+all_AUTs_cons : LEMMA
+  FORALL (c0 : Configuration, l0 : list[Configuration], eq : AUT) :
+    member(eq, all_AUTs(cons(c0, l0))) IFF
+      (member(eq, c0`unsolved) OR member(eq, c0`solved) OR member(eq, all_AUTs(l0)))
+
+% Membership in the set of AUTs of a list of configurations
+all_AUTs_member : LEMMA
+  FORALL (lc : list[(validConfiguration?)], eq : AUT) :
+    member(eq, all_AUTs(lc)) IFF
+      EXISTS (c1 : (validConfiguration?)) :
+        member(c1, lc) AND (member(eq, c1`unsolved) OR member(eq, c1`solved))
+
+vars(lc : list[(validConfiguration?)]) : RECURSIVE finite_set[variable]  =
+IF null?(lc) THEN emptyset ELSE union(vars(car(lc)), vars(cdr(lc))) ENDIF
+MEASURE lc by <<
+
+% The variables of a configuration of a list are variables of the list
+vars_member_lc : LEMMA
+  FORALL (lc : list[(validConfiguration?)], c1 : (validConfiguration?)) :
+    member(c1, lc) IMPLIES subset?(vars(c1), vars(lc))
+
+% Labels of the AUTs of a list of configurations are variables of the list
+all_AUTs_labels_in_vars_lc : LEMMA
+  FORALL (lc : list[(validConfiguration?)], eq : AUT) :
+    member(eq, all_AUTs(lc)) IMPLIES member(eq`label, vars(lc))
+
+% membership in a nonempty list of configurations
+member_cdr_confs : LEMMA
+  FORALL (l : (cons?[(validConfiguration?)]), c : (validConfiguration?)) :
+    member(c, l) IFF (c = car(l) OR member(c, cdr(l)))
+
+% members of an appended list of configurations belong to one of the lists
+member_append_confs : LEMMA
+  FORALL (l1, l2 : list[(validConfiguration?)], c : (validConfiguration?)) :
+    member(c, append(l1, l2)) IMPLIES member(c, l1) OR member(c, l2)
+
+% members of a list of normal configurations are normal
+member_normal_list : LEMMA
+  FORALL (l : list[qs_normal_conf], c : (validConfiguration?)) :
+    member(c, l) IMPLIES null?(c`unsolved)
+
+gen_conf_refl : LEMMA
+  FORALL (nc : qs_normal_conf) : gen_conf?(nc, nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Pairs of lists of configurations
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+pair_lc : TYPE =  [list[(validConfiguration?)], list[qs_normal_conf]]
+
+solved_lbs(plc : pair_lc) : finite_set[variable] = solved_lbls(append(plc`1, plc`2))
+
+% Union of the sets of AUTs of all configurations in both components of a plc
+all_AUTs(plc : [list[Configuration], list[Configuration]]) : set[AUT] =
+  union(all_AUTs(plc`1), all_AUTs(plc`2))
+
+% AUTs of the plc labelled by the same label are equal; and every label of
+% a solved AUT in plc`1 that belongs to the domain of the substitution of
+% some normal configuration in plc`2 is mapped by that substitution to a
+% label that is also in the set of solved labels
+valid_plc?(plc : pair_lc) : bool
+=  (FORALL (eq1, eq2 : AUT) :
+      member(eq1, all_AUTs(plc)) AND member(eq2, all_AUTs(plc)) AND eq1`label = eq2`label
+        IMPLIES   eq1`lhs = eq2`lhs AND eq1`rhs = eq2`rhs  )
+                    % repeated_AUT?(eq1, eq2))?
+    AND
+    (FORALL (eq : AUT | match_Sol?(eq) AND member(eq, all_AUTs(plc)),
+             c : (validConfiguration?) | member(c, append(plc`1,plc`2))) :
+      member(eq`label, dom(c`substitution)) IMPLIES
+        EXISTS (seq : AUT) :
+          member(seq, c`solved) AND subs(c`substitution)(eq`label) = variable(seq`label) AND repeated_AUT?(eq,seq))
+
+valid_plc : TYPE = (valid_plc?)
+
+vars(plc : pair_lc) : finite_set[variable] = union(vars(plc`1), vars(plc`2))
+
+% variables of the first configuration are variables of the pair of lists
+vars_car_plc : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1)) : subset?(vars(car(plc`1)), vars(plc))
+
+% labels fresh for a pair of lists of configurations are fresh for its first configuration
+freshness_plc : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), V : finite_set[variable]) :
+    NOT member(freshLabel(vars(plc)), vars(car(plc`1))) AND
+    NOT member(freshLabel(union(vars(plc), V)), vars(car(plc`1)))
+
+% Labels of the AUTs of a plc are variables of the plc
+all_AUTs_labels_in_vars : LEMMA
+  FORALL (plc : pair_lc, eq : AUT) :
+    member(eq, all_AUTs(plc)) IMPLIES member(eq`label, vars(plc))
+
+% AUTs of the first configuration of a plc are AUTs of the plc
+all_AUTs_car : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), eq : AUT) :
+    (member(eq, car(plc`1)`unsolved) OR member(eq, car(plc`1)`solved))
+      IMPLIES member(eq, all_AUTs(plc))
+
+% AUTs of the tail of the first component and of the second component of a plc
+all_AUTs_cdr : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), eq : AUT) :
+    member(eq, all_AUTs(cdr(plc`1))) OR member(eq, all_AUTs(plc`2))
+      IMPLIES member(eq, all_AUTs(plc))
+
+% AUTs after replacing the first configuration of a plc by one configuration
+all_AUTs_replace_car : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), plcp : [list[Configuration], list[Configuration]] | cons?(plcp`1), eq : AUT) :
+    cdr(plcp`1) = cdr(plc`1) AND plcp`2 = plc`2 AND member(eq, all_AUTs(plcp)) IMPLIES
+      member(eq, car(plcp`1)`unsolved) OR member(eq, car(plcp`1)`solved) OR member(eq, all_AUTs(plc))
+
+% AUTs after replacing the first configuration of a plc by two configurations
+all_AUTs_replace_car2 : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), plcp : [list[Configuration], list[Configuration]] | cons?(plcp`1) AND cons?(cdr(plcp`1)), eq : AUT) :
+    cdr(cdr(plcp`1)) = cdr(plc`1) AND plcp`2 = plc`2 AND member(eq, all_AUTs(plcp)) IMPLIES
+      member(eq, car(plcp`1)`unsolved) OR member(eq, car(plcp`1)`solved) OR
+      member(eq, car(cdr(plcp`1))`unsolved) OR member(eq, car(cdr(plcp`1))`solved) OR
+      member(eq, all_AUTs(plc))
+
+% Uniqueness of labels is transferred from plc to plcp when every AUT of plcp
+% with an old label (a variable of plc) is an AUT of plc, and AUTs of plcp
+% with the same fresh label are equal
+uniq_labels_transfer : LEMMA
+  FORALL (plc : pair_lc, plcp : [list[Configuration], list[Configuration]]) :
+    (FORALL (eq1, eq2 : AUT) :
+      member(eq1, all_AUTs(plc)) AND member(eq2, all_AUTs(plc)) AND eq1`label = eq2`label
+        IMPLIES eq1 = eq2) AND
+    (FORALL (eq : AUT) :
+      member(eq, all_AUTs(plcp)) AND member(eq`label, vars(plc)) IMPLIES member(eq, all_AUTs(plc))) AND
+    (FORALL (eq1, eq2 : AUT) :
+      member(eq1, all_AUTs(plcp)) AND member(eq2, all_AUTs(plcp)) AND eq1`label = eq2`label AND
+      NOT member(eq1`label, vars(plc)) IMPLIES eq1 = eq2)
+    IMPLIES
+    (FORALL (eq1, eq2 : AUT) :
+      member(eq1, all_AUTs(plcp)) AND member(eq2, all_AUTs(plcp)) AND eq1`label = eq2`label
+        IMPLIES eq1 = eq2)
+
+% Membership in the set of AUTs of a plc
+all_AUTs_plc_member : LEMMA
+  FORALL (plc : [list[(validConfiguration?)], list[(validConfiguration?)]], eq : AUT) :
+    member(eq, all_AUTs(plc)) IFF
+      EXISTS (c1 : (validConfiguration?)) :
+        (member(c1, plc`1) OR member(c1, plc`2)) AND
+        (member(eq, c1`unsolved) OR member(eq, c1`solved))
+
+% The domain of the substitution of a configuration of a plc consists of variables of the plc
+dom_in_vars_plc : LEMMA
+  FORALL (plc : pair_lc, c1 : (validConfiguration?), X : variable) :
+    (member(c1, plc`1) OR member(c1, plc`2)) AND member(X, dom(c1`substitution))
+      IMPLIES member(X, vars(plc))
+
+% A pair of lists of configurations is normal when its first list is empty
+ normal_plc?(plc : pair_lc) : bool = null?(plc`1)
+
+% moving the first configuration of plc`1 to plc`2 preserves the configurations
+move_car_or : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), c1 : (validConfiguration?)) :
+    (member(c1, cdr(plc`1)) OR member(c1, cons(car(plc`1), plc`2))) IFF
+    (member(c1, plc`1) OR member(c1, plc`2))
+
+% A configuration n obtained from the configuration c (with nonempty unsolved part)
+% of a plc: its AUTs are AUTs of plc or have fresh labels, it keeps the solved AUTs
+% of c, and its substitution is either the substitution of c or extends it by
+% binding the label of the first unsolved AUT of c (to a solved label of a
+% repeated AUT, if this AUT is in solved form)
+new_conf?(plc : pair_lc, c : {c : (validConfiguration?) | cons?(c`unsolved)},
+          n : (validConfiguration?)) : bool =
+  (FORALL (eq1 : AUT) : (member(eq1, n`unsolved) OR member(eq1, n`solved)) IMPLIES
+     (member(eq1, all_AUTs(plc)) OR NOT member(eq1`label, vars(plc)))) AND
+  (FORALL (eq1 : AUT) : member(eq1, c`solved) IMPLIES member(eq1, n`solved)) AND
+  (n`substitution = c`substitution OR
+   EXISTS (t : first_order_term) :
+     n`substitution = cons((car(c`unsolved)`label, t), c`substitution) AND
+     (NOT match_Sol?(car(c`unsolved)) OR
+      EXISTS (seq : AUT) : member(seq, c`solved) AND t = variable(seq`label) AND
+                           repeated_AUT?(car(c`unsolved), seq)))
+
+% AUTs of a plc whose first list consists of configurations of plc`1 and of new
+% configurations obtained from c are AUTs of plc or have fresh labels
+new_AUTs_old_or_fresh : LEMMA
+  FORALL (plc : pair_lc, c : (validConfiguration?) | cons?(c`unsolved),
+          L : list[(validConfiguration?)], eq : AUT) :
+    (FORALL (c1 : (validConfiguration?)) :
+       member(c1, L) IMPLIES (member(c1, plc`1) OR new_conf?(plc, c, c1))) AND
+    member(eq, all_AUTs((L, plc`2)))
+    IMPLIES member(eq, all_AUTs(plc)) OR NOT member(eq`label, vars(plc))
+
+% Preservation of the second condition of valid_plc? when the first list of a
+% plc is replaced by a list of configurations of plc`1 and of new configurations
+% obtained from a configuration c of plc`1
+valid_plc_sol_cond_preserv : LEMMA
+  FORALL (plc : (valid_plc?), c : (validConfiguration?) | cons?(c`unsolved),
+          L : list[(validConfiguration?)]) :
+    member(c, plc`1) AND
+    (FORALL (c1 : (validConfiguration?)) :
+       member(c1, L) IMPLIES (member(c1, plc`1) OR new_conf?(plc, c, c1)))
+    IMPLIES
+    (FORALL (eq : AUT | match_Sol?(eq) AND member(eq, all_AUTs((L, plc`2))),
+             c2 : (validConfiguration?) | member(c2, append(L, plc`2))) :
+       member(eq`label, dom(c2`substitution)) IMPLIES
+         EXISTS (seq : AUT) :
+           member(seq, c2`solved) AND subs(c2`substitution)(eq`label) = variable(seq`label) AND
+           repeated_AUT?(eq, seq))
+
+% Second condition of valid_plc? after replacing the first configuration of plc`1
+% by one or two new configurations obtained from it
+valid_plc_replace_car : COROLLARY
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND cons?(car(plc`1)`unsolved), n : (validConfiguration?)) :
+    new_conf?(plc, car(plc`1), n) IMPLIES
+    (FORALL (eq : AUT | match_Sol?(eq) AND member(eq, all_AUTs((cons(n, cdr(plc`1)), plc`2))),
+             c2 : (validConfiguration?) | member(c2, append(cons(n, cdr(plc`1)), plc`2))) :
+       member(eq`label, dom(c2`substitution)) IMPLIES
+         EXISTS (seq : AUT) :
+           member(seq, c2`solved) AND subs(c2`substitution)(eq`label) = variable(seq`label) AND
+           repeated_AUT?(eq, seq))
+
+valid_plc_replace_car2 : COROLLARY
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND cons?(car(plc`1)`unsolved), n1, n2 : (validConfiguration?)) :
+    new_conf?(plc, car(plc`1), n1) AND new_conf?(plc, car(plc`1), n2) IMPLIES
+    (FORALL (eq : AUT | match_Sol?(eq) AND member(eq, all_AUTs((cons(n1, cons(n2, cdr(plc`1))), plc`2))),
+             c2 : (validConfiguration?) | member(c2, append(cons(n1, cons(n2, cdr(plc`1))), plc`2))) :
+       member(eq`label, dom(c2`substitution)) IMPLIES
+         EXISTS (seq : AUT) :
+           member(seq, c2`solved) AND subs(c2`substitution)(eq`label) = variable(seq`label) AND
+           repeated_AUT?(eq, seq))
+
+% AUTs of a plc obtained by replacing the first configuration of plc`1 by a
+% configuration whose AUTs are AUTs of the replaced one are AUTs of the plc
+sub_AUTs_replace_car : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), n : (validConfiguration?), eq : AUT) :
+    (FORALL (eq1 : AUT) : (member(eq1, n`unsolved) OR member(eq1, n`solved)) IMPLIES
+       (member(eq1, car(plc`1)`unsolved) OR member(eq1, car(plc`1)`solved))) AND
+    member(eq, all_AUTs((cons(n, cdr(plc`1)), plc`2)))
+    IMPLIES member(eq, all_AUTs(plc))
+
+% Moving the first configuration of plc`1 to plc`2 preserves the configurations
+move_car_confs : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), c2 : (validConfiguration?)) :
+    member(c2, append(cdr(plc`1), cons(car(plc`1), plc`2))) IFF member(c2, append(plc`1, plc`2))
+
+% Moving the first configuration of plc`1 to plc`2 preserves the AUTs
+move_car_AUTs : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1), eq : AUT) :
+    member(eq, all_AUTs((cdr(plc`1), cons(car(plc`1), plc`2)))) IFF member(eq, all_AUTs(plc))
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Configuration invariants and preservation constraints
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Invariant of antiunifyC for an AUT eq in solved form: its label is still
+% recorded in some configuration, AUTs with the same label have the same sides,
+% and wherever its label is bound, it is bound to the label of a solved AUT
+% repeating eq
+inv_sol?(plc : pair_lc, eq : AUT) : bool =
+  match_Sol?(eq) AND
+  (EXISTS (ca : (validConfiguration?)) :
+     (member(ca, plc`1) OR member(ca, plc`2)) AND
+     (member(eq`label, labels(append(ca`unsolved, ca`solved))) OR
+      member(eq`label, supset_dom(ca`substitution)))) AND
+  (FORALL (eq1 : AUT) :
+     member(eq1, all_AUTs(plc)) AND eq1`label = eq`label IMPLIES
+       eq1`lhs = eq`lhs AND eq1`rhs = eq`rhs) AND
+  (FORALL (c : (validConfiguration?)) :
+     (member(c, plc`1) OR member(c, plc`2)) AND member(eq`label, dom(c`substitution)) IMPLIES
+       EXISTS (seq : AUT) :
+         member(seq, c`solved) AND subs(c`substitution)(eq`label) = variable(seq`label) AND
+         repeated_AUT?(eq, seq))
+
+% the label of eq is a variable of the plc
+inv_sol_label_in_vars : LEMMA
+  FORALL (plc : pair_lc, eq : AUT) : inv_sol?(plc, eq) IMPLIES member(eq`label, vars(plc))
+
+% the invariant holds for AUTs in solved form of a valid plc
+inv_sol_init : LEMMA
+  FORALL (plc : (valid_plc?), eq : AUT) :
+    match_Sol?(eq) AND member(eq, all_AUTs(plc)) IMPLIES inv_sol?(plc, eq)
+
+% the invariant is preserved when configurations of plc`1 different from c are
+% kept and c is replaced by new configurations obtained from it
+inv_sol_preserv : LEMMA
+  FORALL (plc, plcp : pair_lc, c : (validConfiguration?) | cons?(c`unsolved), eq : AUT) :
+    inv_sol?(plc, eq) AND member(c, plc`1) AND plcp`2 = plc`2 AND
+    (FORALL (c1 : (validConfiguration?)) :
+       member(c1, plcp`1) IMPLIES
+         (member(c1, plc`1) OR (new_conf?(plc, c, c1) AND keep_lbls?(c, c1)))) AND
+    (FORALL (c1 : (validConfiguration?)) :
+       member(c1, plc`1) IMPLIES (c1 = c OR member(c1, plcp`1))) AND
+    (EXISTS (n : (validConfiguration?)) : member(n, plcp`1) AND keep_lbls?(c, n))
+    IMPLIES inv_sol?(plcp, eq)
+
+% instances: replacing the first configuration by one or two new configurations
+inv_sol_replace_car : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1) AND cons?(car(plc`1)`unsolved),
+          plcp : pair_lc | cons?(plcp`1), eq : AUT) :
+    inv_sol?(plc, eq) AND cdr(plcp`1) = cdr(plc`1) AND plcp`2 = plc`2 AND
+    new_conf?(plc, car(plc`1), car(plcp`1)) AND keep_lbls?(car(plc`1), car(plcp`1))
+    IMPLIES inv_sol?(plcp, eq)
+
+inv_sol_replace_car2 : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1) AND cons?(car(plc`1)`unsolved),
+          plcp : pair_lc | cons?(plcp`1) AND cons?(cdr(plcp`1)), eq : AUT) :
+    inv_sol?(plc, eq) AND cdr(cdr(plcp`1)) = cdr(plc`1) AND plcp`2 = plc`2 AND
+    new_conf?(plc, car(plc`1), car(plcp`1)) AND keep_lbls?(car(plc`1), car(plcp`1)) AND
+    new_conf?(plc, car(plc`1), car(cdr(plcp`1))) AND keep_lbls?(car(plc`1), car(cdr(plcp`1)))
+    IMPLIES inv_sol?(plcp, eq)
+
+% the invariant is preserved when a normal configuration is moved to plc`2
+inv_sol_move : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1) AND null?(car(plc`1)`unsolved), eq : AUT) :
+    inv_sol?(plc, eq) IMPLIES inv_sol?((cdr(plc`1), cons(car(plc`1), plc`2)), eq)
+
+% a new configuration n obtained from c keeps the decomposition property
+new_conf_sub_prefix : LEMMA
+  FORALL (plc : pair_lc, c : (validConfiguration?) | cons?(c`unsolved),
+          n, nc : (validConfiguration?), theta1 : nice_C_sub) :
+    new_conf?(plc, c, n) AND nc`substitution = append(theta1, n`substitution)
+    IMPLIES
+    EXISTS (theta : nice_C_sub) : nc`substitution = append(theta, c`substitution)
+
+% the decomposition step keeping track of variables V not bound by the prefix
+new_conf_sub_prefix_vars : LEMMA
+  FORALL (plc : pair_lc, c : (validConfiguration?) | cons?(c`unsolved),
+          n, nc : (validConfiguration?), theta1 : nice_C_sub, V : finite_set[variable]) :
+    new_conf?(plc, c, n) AND nc`substitution = append(theta1, n`substitution) AND
+    disjoint?(supset_dom(theta1), V) AND disjoint?(V, labels(c`unsolved))
+    IMPLIES
+    EXISTS (theta : nice_C_sub) :
+      nc`substitution = append(theta, c`substitution) AND disjoint?(supset_dom(theta), V)
+
+% an ancestor of nc obtained by one step from c gives the ancestor c of nc
+ancestor_step : LEMMA
+  FORALL (plc : pair_lc, c : (validConfiguration?) | cons?(c`unsolved),
+          n, nc : (validConfiguration?)) :
+    new_conf?(plc, c, n) AND lbls_new?(c, n) AND vars_kept?(c, n) AND sol_lbls?(c, n) AND
+    ancestor?(n, nc)
+    IMPLIES ancestor?(c, nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*******%%%%
+%%%%%%%%%%% Decompose-Function (DecF) inference rule %%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  match_DecF_conf?(c: (validConfiguration?)): bool = match_DecF?(c`unsolved)
+
+  match_DecCmmF_conf?(c: (validConfiguration?)): bool = match_DecCmmF?(c`unsolved)
+
+% DecF is applied only to non-commutative symbols: app(f, variable(lbl))
+% is a C-term only if f is not commutative.
+  match_DecF_nonC_conf?(c: (validConfiguration?)): bool =
+     match_DecF_conf?(c) AND NOT match_DecCmmF_conf?(c)
+
+  uns_solv_vars_match_DecF_conf: LEMMA FORALL (c: (match_DecF_nonC_conf?)):
+         LET eq = car(c`unsolved),
+             lhs = eq`lhs,
+             rhs = eq`rhs IN
+         vars(append(c`unsolved, c`solved)) = union(vars(arg(lhs)), union(vars(arg(rhs)),
+	 			 	       vars(append(cdr(c`unsolved), c`solved))))
+
+% Adaptation for E-anti-unification
+DecF(plc: (valid_plc?) | cons?(plc`1) AND match_DecF_nonC_conf?(car(plc`1))) :
+   {plcp : (valid_plc?) | cons?(plcp`1) AND cdr(plcp`1)  = cdr(plc`1) AND plcp`2 = plc`2 AND
+                     LET cp = car(plcp`1), c = car(plc`1) IN
+		                              cons?(cp`unsolved) AND
+                                              cdr(c`unsolved) = cdr(cp`unsolved) AND
+                                              subs(cp`substitution)(variable(car(c`unsolved)`label)) =
+	                         	      app(sym((car(c`unsolved))`lhs),
+					      variable(car(cp`unsolved)`label)) AND
+					      size(cp`unsolved) < size(c`unsolved)}  
+=
+  LET c = car(plc`1),
+      eq = car(c`unsolved),
+      lhs = eq`lhs,
+      rhs = eq`rhs,
+      lbl = freshLabel(vars(plc)),
+      cp = c with [ unsolved := cons(  makeAUT(arg(lhs),arg(rhs),lbl), cdr(c`unsolved)),
+                substitution := cons(  (eq`label,  app(sym(eq`lhs),variable(lbl))), c`substitution) ]
+IN
+ (cons(cp,cdr(plc`1)), plc`2)
+   
+
+
+% Properties of the configurations built by DecF
+
+new_conf_DecF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecF_nonC_conf?(car(plc`1))) :
+    new_conf?(plc, car(plc`1), car(DecF(plc)`1)) AND keep_lbls?(car(plc`1), car(DecF(plc)`1))
+
+lbls_new_DecF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecF_nonC_conf?(car(plc`1))) :
+    lbls_new?(car(plc`1), car(DecF(plc)`1))
+
+vars_kept_DecF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecF_nonC_conf?(car(plc`1))) :
+    vars_kept?(car(plc`1), car(DecF(plc)`1))
+
+sol_lbls_DecF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecF_nonC_conf?(car(plc`1))) :
+    sol_lbls?(car(plc`1), car(DecF(plc)`1))
+
+gen_step_DecF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecF_nonC_conf?(car(plc`1)),
+          nc : (validConfiguration?)) :
+    ancestor?(car(DecF(plc)`1), nc) AND gen_conf?(car(DecF(plc)`1), nc) IMPLIES
+      gen_conf?(car(plc`1), nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%% Decompose-Function (DecCmmF) inference rule %%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% For f commutative, an AUT  X: f(s1,s2) =? f(t1,t2)  gives rise to two
+% configurations, both with  X -> f(Y1,Y2):
+%   direct:  Y1: s1 =? t1,  Y2: s2 =? t2
+%   crossed: Y1: s1 =? t2,  Y2: s2 =? t1
+
+DecCmmF(plc: (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+   {plcp : (valid_plc?) | cons?(plcp`1) AND cons?(cdr(plcp`1)) AND cdr(cdr(plcp`1)) = cdr(plc`1)
+                     AND plcp`2 = plc`2 AND
+                     LET cpp = car(plcp`1), cp = car(cdr(plcp`1)), c = car(plc`1),
+                         aut_c = car(c`unsolved) IN
+                     cons?(cp`unsolved) AND cons?(cdr(cp`unsolved)) AND
+                     cons?(cpp`unsolved) AND cons?(cdr(cpp`unsolved)) AND
+                     cdr(cdr(cp`unsolved)) = cdr(c`unsolved) AND
+                     cdr(cdr(cpp`unsolved)) = cdr(c`unsolved) AND
+                     subs(cp`substitution)(variable(aut_c`label)) =
+                        app(sym(aut_c`lhs),
+                            pair(variable(car(cp`unsolved)`label),
+                                 variable(car(cdr(cp`unsolved))`label))) AND
+                     subs(cpp`substitution)(variable(aut_c`label)) =
+                        app(sym(aut_c`lhs),
+                            pair(variable(car(cpp`unsolved)`label),
+                                 variable(car(cdr(cpp`unsolved))`label))) AND
+                     size(cp`unsolved) < size(c`unsolved) AND
+                     size(cpp`unsolved) < size(c`unsolved)}
+=
+  LET c = car(plc`1),
+      eq = car(c`unsolved),
+      lhs = eq`lhs,
+      rhs = eq`rhs,
+      lbl1 = freshLabel(vars(plc)),
+      lbl2 = freshLabel(union(vars(plc), singleton(lbl1))),
+      cp = c with [ unsolved := cons(makeAUT(term1(arg(lhs)), term1(arg(rhs)), lbl1),
+                                cons(makeAUT(term2(arg(lhs)), term2(arg(rhs)), lbl2),
+                                     cdr(c`unsolved))),
+                    substitution := cons((eq`label,
+                                          app(sym(lhs), pair(variable(lbl1), variable(lbl2)))),
+                                         c`substitution) ],
+      plc_int = (cons(cp, cdr(plc`1)), plc`2),
+      lbl3 = freshLabel(union(vars(plc), add(lbl1, singleton(lbl2)))),
+      lbl4 = freshLabel(union(vars(plc), add(lbl1, add(lbl2, singleton(lbl3))))),
+      cpp = c with [ unsolved := cons(makeAUT(term1(arg(lhs)), term2(arg(rhs)), lbl3),
+                                 cons(makeAUT(term2(arg(lhs)), term1(arg(rhs)), lbl4),
+                                      cdr(c`unsolved))),
+                     substitution := cons((eq`label,
+                                           app(sym(lhs), pair(variable(lbl3), variable(lbl4)))),
+                                          c`substitution) ]
+  IN
+      (cons(cpp, plc_int`1), plc`2)
+
+
+% Properties of the configurations built by DecCmmF
+
+new_conf_DecCmmF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+    new_conf?(plc, car(plc`1), car(DecCmmF(plc)`1)) AND
+    keep_lbls?(car(plc`1), car(DecCmmF(plc)`1)) AND
+    new_conf?(plc, car(plc`1), car(cdr(DecCmmF(plc)`1))) AND
+    keep_lbls?(car(plc`1), car(cdr(DecCmmF(plc)`1)))
+
+lbls_new_DecCmmF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+    lbls_new?(car(plc`1), car(DecCmmF(plc)`1))
+
+lbls_new_DecCmmF2 : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+    lbls_new?(car(plc`1), car(cdr(DecCmmF(plc)`1)))
+
+vars_kept_DecCmmF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+    vars_kept?(car(plc`1), car(DecCmmF(plc)`1))
+
+vars_kept_DecCmmF2 : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+    vars_kept?(car(plc`1), car(cdr(DecCmmF(plc)`1)))
+
+sol_lbls_DecCmmF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1))) :
+    sol_lbls?(car(plc`1), car(DecCmmF(plc)`1)) AND
+    sol_lbls?(car(plc`1), car(cdr(DecCmmF(plc)`1)))
+
+gen_step_DecCmmF : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1)),
+          nc : (validConfiguration?)) :
+    ancestor?(car(DecCmmF(plc)`1), nc) AND gen_conf?(car(DecCmmF(plc)`1), nc) IMPLIES
+      gen_conf?(car(plc`1), nc)
+
+gen_step_DecCmmF2 : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecCmmF_conf?(car(plc`1)),
+          nc : (validConfiguration?)) :
+    ancestor?(car(cdr(DecCmmF(plc)`1)), nc) AND gen_conf?(car(cdr(DecCmmF(plc)`1)), nc) IMPLIES
+      gen_conf?(car(plc`1), nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%% Decompose-Pairs (DecP) inference rule %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  match_DecP_conf?(c: (validConfiguration?)): bool = match_DecP?(c`unsolved)
+
+  uns_solv_vars_match_DecP_conf: LEMMA FORALL (c: (match_DecP_conf?)):
+          LET eq = car(c`unsolved),
+              lhs = eq`lhs,
+              rhs = eq`rhs IN
+          vars(append(c`unsolved, c`solved)) = union(vars(term1(lhs)), union(vars(term1(rhs)),
+	  			  	       union(vars(term2(lhs)), union(vars(term2(rhs)),
+  	 			 	       vars(append(cdr(c`unsolved), c`solved))))))
+					       
+
+% Adaptation for E-anti-unification
+DecP(plc: (valid_plc?) | cons?(plc`1) AND match_DecP_conf?(car(plc`1))) :
+   {plcp : (valid_plc?) | cons?(plcp`1) AND cdr(plcp`1)  = cdr(plc`1) AND plcp`2 = plc`2 AND
+                     LET cp = car(plcp`1), c = car(plc`1) IN
+                        cons?(cp`unsolved) AND
+                        cons?(cdr(cp`unsolved)) AND cdr(cdr(cp`unsolved)) = cdr(c`unsolved) AND
+                        subs(cp`substitution)(variable(car(c`unsolved)`label)) =
+			pair(variable(car(cp`unsolved)`label),
+			variable(car(cdr(cp`unsolved))`label))  AND
+			size(cp`unsolved) < size(c`unsolved)} 
+=
+LET c = car(plc`1), eq = car(c`unsolved), lhs = eq`lhs, rhs = eq`rhs,
+	lbl1 = freshLabel(vars(plc)),
+	lbl2 = freshLabel(union(vars(plc),singleton(lbl1))), 
+        cp = c with [ unsolved := cons( makeAUT(term1(lhs),term1(rhs),lbl1),
+                                  cons(makeAUT(term2(lhs),term2(rhs),lbl2), cdr(c`unsolved))),
+                substitution := cons( (eq`label, pair(variable(lbl1),variable(lbl2))), c`substitution) ]
+		IN
+  (cons(cp,cdr(plc`1)), plc`2)
+
+
+% Properties of the configurations built by DecP
+
+new_conf_DecP : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecP_conf?(car(plc`1))) :
+    new_conf?(plc, car(plc`1), car(DecP(plc)`1)) AND keep_lbls?(car(plc`1), car(DecP(plc)`1))
+
+lbls_new_DecP : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecP_conf?(car(plc`1))) :
+    lbls_new?(car(plc`1), car(DecP(plc)`1))
+
+vars_kept_DecP : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecP_conf?(car(plc`1))) :
+    vars_kept?(car(plc`1), car(DecP(plc)`1))
+
+sol_lbls_DecP : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecP_conf?(car(plc`1))) :
+    sol_lbls?(car(plc`1), car(DecP(plc)`1))
+
+gen_step_DecP : LEMMA
+  FORALL (plc : (valid_plc?) | cons?(plc`1) AND match_DecP_conf?(car(plc`1)),
+          nc : (validConfiguration?)) :
+    ancestor?(car(DecP(plc)`1), nc) AND gen_conf?(car(DecP(plc)`1), nc) IMPLIES
+      gen_conf?(car(plc`1), nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%% Syntactic inference rule  %%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  match_Synt_conf?(c: (validConfiguration?)): bool
+  = match_Synt?(c`unsolved)
+
+  nice_sub_Synt: LEMMA FORALL (c: (match_Synt_conf?)):   
+    LET eq = car(c`unsolved) IN
+    nice?(cons((eq`label, eq`lhs), c`substitution))
+
+  Synt(c: (match_Synt_conf?)): {cp : (validConfiguration?) |
+  		    			       subs(cp`substitution)(variable(car(c`unsolved)`label)) =
+					        car(c`unsolved)`lhs AND 
+					       size(cp`unsolved) < size(c`unsolved)}
+  =   LET eq = car(c`unsolved), lhs = eq`lhs
+      IN  c with [unsolved := cdr(c`unsolved),
+                 substitution := cons( (eq`label, lhs),  c`substitution ) ]
+
+ syntAUT_inter_vars_unsolv_labels_solv: LEMMA
+    FORALL (c: (match_Synt_conf?)):
+      empty?(intersection(vars(car(c`unsolved)), labels(Synt(c)`solved)))
+
+ labels_Synt: LEMMA
+   FORALL (c: (match_Synt_conf?)):
+       labels(Synt(c)`solved) = labels(c`solved)
+
+ syntAUT_car_lhs_member_img: LEMMA
+   FORALL (c: (match_Synt_conf?)):
+      member(car(c`unsolved)`lhs, img(Synt(c)`substitution))
+
+ domain_Synt: LEMMA
+   FORALL (c: (match_Synt_conf?)):
+   LET lbl = car(c`unsolved)`label IN
+   dom(Synt(c)`substitution) = union(singleton(lbl), dom(c`substitution))
+
+
+vars_img_Synt: LEMMA
+   FORALL (c: (match_Synt_conf?)):
+      IF
+         const?(car(c`unsolved)`lhs) OR
+	 unit?(car(c`unsolved)`lhs)
+      THEN
+         vars(img(Synt(c)`substitution)) = remove(car(c`unsolved)`label, vars(img(c`substitution)))
+      ELSE
+         vars(img(Synt(c)`substitution)) = add(V(car(c`unsolved)`lhs), remove(car(c`unsolved)`label, vars(img(c`substitution))))
+      ENDIF
+
+
+% Properties of the configurations built by Synt
+
+new_conf_Synt : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1) AND match_Synt_conf?(car(plc`1))) :
+    new_conf?(plc, car(plc`1), Synt(car(plc`1))) AND keep_lbls?(car(plc`1), Synt(car(plc`1)))
+
+lbls_new_Synt : LEMMA
+  FORALL (c : (match_Synt_conf?)) : lbls_new?(c, Synt(c))
+
+vars_kept_Synt : LEMMA
+  FORALL (c : (match_Synt_conf?)) : vars_kept?(c, Synt(c))
+
+sol_lbls_Synt : LEMMA
+  FORALL (c : (match_Synt_conf?)) : sol_lbls?(c, Synt(c))
+
+gen_step_Synt : LEMMA
+  FORALL (c : (match_Synt_conf?), nc : (validConfiguration?)) :
+    ancestor?(Synt(c), nc) AND gen_conf?(Synt(c), nc) IMPLIES gen_conf?(c, nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%% Solve inference rule  %%%%%%%%%%%%%%%%%%%%%%
+%%%% It integrates both Solve-Repeated and Solve-Non-Repeated %%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+  match_Sol_conf?(c: (validConfiguration?)): bool
+  = match_Sol?(c`unsolved)
+
+ nice_sub_Solved_AUT: LEMMA FORALL (c: (match_Sol_conf?)):   
+     AUT_repeated_in?(car(c`unsolved), c`solved) IMPLIES
+       LET sol_AUT = car(c`unsolved),  rep_AUT = rep_AUT_in(cons(sol_AUT,c`solved))  IN
+       nice?(cons((sol_AUT`label, variable(rep_AUT`label)), c`substitution))
+	 
+  Solve(c: (match_Sol_conf?)): {cp : (validConfiguration?) | size(cp`unsolved) < size(c`unsolved)}
+  = IF AUT_repeated_in?(car(c`unsolved), c`solved) THEN
+       LET sol_AUT =car(c`unsolved), rep_AUT = rep_AUT_in(cons(sol_AUT,c`solved)) IN
+         c with [unsolved := cdr(c`unsolved),
+	         substitution:= cons( (sol_AUT`label, variable(rep_AUT`label)), c`substitution)] 
+    ELSE c with [unsolved := cdr(c`unsolved),
+                 solved := cons(car(c`unsolved),c`solved)]
+    ENDIF
+
+domain_Solve: LEMMA
+   FORALL (c: (match_Sol_conf?)):
+      IF
+         AUT_repeated_in?(car(c`unsolved), c`solved)
+      THEN
+         dom(Solve(c)`substitution) = add(car(c`unsolved)`label, dom(c`substitution))
+      ELSE
+         dom(Solve(c)`substitution) = dom(c`substitution)
+      ENDIF
+
+vars_img_Solve: LEMMA
+   FORALL (c: (match_Sol_conf?)):
+      IF
+         AUT_repeated_in?(car(c`unsolved), c`solved)
+      THEN
+         vars(img(Solve(c)`substitution)) = add(rep_AUT_in(cons(car(c`unsolved), c`solved))`label, remove(car(c`unsolved)`label, vars(img(c`substitution))))
+      ELSE
+         vars(img(Solve(c)`substitution)) = vars(img(c`substitution))
+      ENDIF
+
+% Properties of the configurations built by Solve
+
+new_conf_Solve : LEMMA
+  FORALL (plc : pair_lc | cons?(plc`1) AND match_Sol_conf?(car(plc`1))) :
+    new_conf?(plc, car(plc`1), Solve(car(plc`1))) AND keep_lbls?(car(plc`1), Solve(car(plc`1)))
+
+lbls_new_Solve : LEMMA
+  FORALL (c : (match_Sol_conf?)) : lbls_new?(c, Solve(c))
+
+vars_kept_Solve : LEMMA
+  FORALL (c : (match_Sol_conf?)) : vars_kept?(c, Solve(c))
+
+sol_lbls_Solve : LEMMA
+  FORALL (c : (match_Sol_conf?)) : sol_lbls?(c, Solve(c))
+
+gen_step_Solve : LEMMA
+  FORALL (c : (match_Sol_conf?), nc : (validConfiguration?)) :
+    ancestor?(Solve(c), nc) AND gen_conf?(Solve(c), nc) IMPLIES gen_conf?(c, nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Classification of configurations
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+ antiunify_derivability :  LEMMA 
+    FORALL(c:(validConfiguration?)) : NOT normal_configuration?(c) =>
+      match_DecF_conf?(c) OR  match_DecP_conf?(c)  OR
+      match_Synt_conf?(c) OR match_Sol_conf?(c)
+
+ match_DecP_classification: LEMMA
+   FORALL(c:(validConfiguration?)) : NOT normal_configuration?(c) IMPLIES
+    (match_DecP_conf?(c) IMPLIES NOT match_DecF_conf?(c))
+
+ match_Synt_classification: LEMMA
+   FORALL(c:(validConfiguration?)) : NOT normal_configuration?(c) IMPLIES
+   (match_Synt_conf?(c) IMPLIES NOT (match_DecF_conf?(c) OR match_DecP_conf?(c)))
+
+ SolvedAUT_classification: LEMMA
+   FORALL(c:(validConfiguration?)) : NOT normal_configuration?(c) IMPLIES
+   (match_Sol_conf?(c) IMPLIES NOT (match_DecF_conf?(c) OR match_DecP_conf?(c) OR match_Synt_conf?(c)))
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%% Antiunification Modulo C algorithm %%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Termination measure of antiunifyC: the multiset of the sizes of the
+% unsolved parts of the configurations still to be processed (plc`1).
+% Every inference rule replaces the size of the unsolved part of the
+% current configuration by smaller ones (one for DecF, DecP, Synt and
+% Solve; two for DecCmmF), and moving a normal configuration to the final
+% list removes one element. Configurations of the final list (plc`2) are
+% not counted: adding them would make the last step non-decreasing.
+
+sizes_ms(lc : list[(validConfiguration?)]) : RECURSIVE finite_multisetT =
+  IF null?(lc) THEN empty_msT
+  ELSE union_msT(singleton_msT(size(car(lc)`unsolved)), sizes_ms(cdr(lc)))
+  ENDIF
+MEASURE length(lc)
+
+size(plc : pair_lc) : finite_multisetT = sizes_ms(plc`1)
+
+% The well-founded measure ordering is the reversal (converse) of >>:
+% conv_ms_ord(m, n) holds when n >> m, i.e., m is below n.
+conv_ms_ord : (well_founded?[finite_multisetT]) = converse(>>);
+
+% Infix notation: m << n means that m is below n in the multiset ordering
+<<: MACRO pred[[finite_multisetT, finite_multisetT]] = conv_ms_ord
+
+conv_ms_ord_well_founded : LEMMA well_founded?[finite_multisetT](conv_ms_ord)
+
+% Replacing an element a by elements smaller than a decreases w.r.t. >>
+msT_gt_replace : LEMMA
+  FORALL (M, Y : finite_multisetT, a : nat) :
+    (FORALL (y : nat) : member_msT?(y, Y) => y < a) IMPLIES
+      union_msT(singleton_msT(a), M) >> union_msT(Y, M)
+
+% Decrease of the measure along the steps of antiunifyC:
+% replacing the first configuration by one with smaller unsolved part,
+conv_ms_ord_replace_car : LEMMA
+  FORALL (l1, l2 : (cons?[(validConfiguration?)])) :
+    cdr(l1) = cdr(l2) AND size(car(l1)`unsolved) < size(car(l2)`unsolved) IMPLIES
+      conv_ms_ord(sizes_ms(l1), sizes_ms(l2))
+
+% replacing the first configuration by two with smaller unsolved parts,
+conv_ms_ord_replace_car2 : LEMMA
+  FORALL (l1 : (cons?[(validConfiguration?)]) | cons?(cdr(l1)), l2 : (cons?[(validConfiguration?)])) :
+    cdr(cdr(l1)) = cdr(l2) AND
+    size(car(l1)`unsolved) < size(car(l2)`unsolved) AND
+    size(car(cdr(l1))`unsolved) < size(car(l2)`unsolved) IMPLIES
+      conv_ms_ord(sizes_ms(l1), sizes_ms(l2))
+
+% and removing the first configuration.
+conv_ms_ord_remove_car : LEMMA
+  FORALL (l : (cons?[(validConfiguration?)])) : conv_ms_ord(sizes_ms(cdr(l)), sizes_ms(l))
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%  antiunifyC  %%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+antiunifyC(plc: (valid_plc?)): recursive (valid_plc?)
+  =
+LET alc = plc`1, nlc = plc`2 IN
+IF cons?(alc) THEN
+LET c = car(alc) IN 
+IF cons?(c`unsolved)
+     THEN
+       IF match_DecCmmF_conf?(c)
+       THEN antiunifyC(DecCmmF(plc))
+       ELSIF match_DecF_conf?(c)
+       THEN      % Apply "Decompose-Function" rule (f non-commutative)
+            antiunifyC(DecF(plc))
+       ELSIF match_DecP_conf?(c)
+       THEN      % Apply "Decompose-Pairs" rule
+            antiunifyC(DecP(plc))
+       ELSIF match_Synt_conf?(c)
+       THEN      % Apply "Syntactic" rule
+            LET cp = Synt(c), plcp = (cons(cp,cdr(alc)), nlc) IN
+            antiunifyC(plcp)
+       ELSE      % Apply "Solve" rule
+            LET cp = Solve(c), plcp = (cons(cp,cdr(alc)), nlc) IN
+            antiunifyC(plcp) 
+       ENDIF
+      ELSE antiunifyC((cdr(alc), cons(car(alc),nlc)))
+      ENDIF
+     ELSE plc
+     ENDIF
+  MEASURE size(plc) BY <<
+
+% If there is a configuration to process or a final one, antiunifyC returns
+% a nonempty list of final configurations (by induction on the measure).
+antiunify_final_nonempty : LEMMA
+  FORALL (plc : (valid_plc?)) : (cons?(plc`1) OR cons?(plc`2)) IMPLIES cons?(antiunifyC(plc)`2)
+
+ antiunify_normality :  LEMMA
+   FORALL(plc : {p : (valid_plc?) | normal_plc?(p)}) : null?(antiunifyC(plc)`1) 
+
+% the invariant is preserved by antiunifyC
+antiunifyC_inv_sol : LEMMA
+  FORALL (plc : (valid_plc?)) : FORALL (eq : AUT) :
+    inv_sol?(plc, eq) IMPLIES inv_sol?(antiunifyC(plc), eq)
+
+% Preservation of solved AUTs into a configuration
+% Now, what we need to prove is that once a solved AUT is moved to the solved part of
+% a configuration (in the plc), all configurations derived from this configuration 
+% preserve this solved AUT in their solved part. 
+
+antiunify_monotony_Sol_AUTs : LEMMA 
+   FORALL (plc : (valid_plc?), eq : AUT | match_Sol?(eq) AND member(eq, all_AUTs(plc))) :
+    FORALL (c:(validConfiguration?) | member(c, antiunifyC(plc)`2), seq : AUT | member(seq, c`solved) ) :
+      (seq`label = eq`label IMPLIES eq = seq) AND     
+      member(eq`label, dom(c`substitution)) IMPLIES 
+       ( EXISTS (seq : AUT) :
+          member(seq, c`solved) AND subs(c`substitution)(eq`label) = variable(seq`label) AND repeated_AUT?(eq,seq))
+
+% Preservation of the solved labels outside the domain of the final
+% substitution generalization; i.e., solved labels are disjoint from
+% the domain of the computed substition solutions.
+% Maybe, it would be possible to prove that all labels of any solved AUT do 
+% not belong to the domain of any substitution solution. 
+%  antiunify_domain_disjoint_sol_labels : CONJECTURE
+%     FORALL (plc : (valid_plc?) | cons?(plc`1)) :
+%       LET c = car(plc`1), cf = car(antiunifyC(plc)`2) IN
+%        disjoint?(dom(cf`substitution), labels(c`solved))
+
+antiunify_domain_disjoint_sol_labelsNew : LEMMA 
+    FORALL (plc : (valid_plc?) | cons?(plc`1)) :
+      LET plcp = antiunifyC(plc) IN
+        FORALL (c : (validConfiguration?) | member(c, append(plc`1, plc`2)), 
+                cf : (validConfiguration?) | member(cf, plcp`2)) : 
+       FORALL (eq : AUT | member(eq, c`solved) AND member(eq`label, intersection(dom(cf`substitution), labels(c`solved)))) :  ( EXISTS (seq : AUT) :
+           member(seq, cf`solved) AND subs(cf`substitution)(eq`label) = variable(seq`label) AND repeated_AUT?(eq,seq))
+
+% Labels of solved AUTs of any computed solution, given in a normal configuration 
+% in the final pcl, do not belong to the domain of the substitution of that solution.
+%  antiunify_sol_labels_not_in_dom : CONJECTURE
+%     FORALL (plc : (valid_plc?), c: (validConfiguration?), cf : qs_normal_conf, eq : AUT) :
+%       member(cf, antiunifyC(plc)`2) AND member(c, plc`1) AND 
+%       member(eq, c`solved) IMPLIES
+%         NOT member(eq`label, dom(cf`substitution))
+
+% Construction incremental of the final substitution generalization
+antiunify_sub_decomposition_gen : LEMMA
+  FORALL (plc : (valid_plc?), c : (validConfiguration?)) :
+    (member(c, plc`1) OR member(c, plc`2)) IMPLIES
+    EXISTS (nc : qs_normal_conf, theta : nice_C_sub) :
+       member(nc, antiunifyC(plc)`2) AND nc`substitution = append(theta, c`substitution)
+
+% Decomposition of the final substitutions in which the prefix does not bind
+% variables of c that are not unsolved labels of c
+antiunify_sub_decomposition_vars : LEMMA
+  FORALL (plc : (valid_plc?), c : (validConfiguration?), V : finite_set[variable]) :
+    (member(c, plc`1) OR member(c, plc`2)) AND
+    subset?(V, vars(c)) AND disjoint?(V, labels(c`unsolved)) IMPLIES
+    EXISTS (nc : qs_normal_conf, theta : nice_C_sub) :
+      member(nc, antiunifyC(plc)`2) AND nc`substitution = append(theta, c`substitution) AND
+      disjoint?(supset_dom(theta), V)
+
+% Preservation of terms without variables proceeding from labels (i.e., terms of the problem)
+ antiunify_sub_preserves_terms: LEMMA
+  FORALL(plc : (valid_plc?)):
+    FORALL(c : (validConfiguration?) | member(c,plc`1)) :
+      LET plcp = antiunifyC(plc) IN
+      EXISTS(nc : qs_normal_conf | member(nc,plcp`2)) :
+        FORALL (t : Term) :
+         (member(t, img(c`substitution)) AND disjoint?(vars(t), labels(c`unsolved))) IMPLIES
+               subs(nc`substitution)(t) = subs(c`substitution)(t)
+
+% Variables in terms of the unsolved part do not move to the domain of the computed generalizer
+ antiunify_dom_sub_preserves_vars_unsolved: LEMMA   
+ FORALL(plc : (valid_plc?)):
+    FORALL(c : (validConfiguration?) | member(c, plc`1)) :
+      LET plcp = antiunifyC(plc) IN
+      EXISTS(nc : qs_normal_conf | member(nc,plcp`2)) :
+   disjoint?(dom(nc`substitution), vars(c`unsolved))
+
+antiunify_ancestor_gen : LEMMA
+  FORALL (plc : (valid_plc?), nc : qs_normal_conf) :
+    member(nc, antiunifyC(plc)`2) IMPLIES
+      member(nc, plc`2) OR
+      EXISTS (c : (validConfiguration?)) : member(c, plc`1) AND ancestor?(c, nc)
+
+% Ancestor of a final configuration: every final configuration either was already
+% final or derives from a configuration c of plc`1 such that
+%  - its substitution extends the substitution of c by a prefix theta,
+%  - theta binds no variable of c other than the unsolved labels of c,
+%  - the labels of its solved AUTs are labels of AUTs of c or fresh for c, and
+%  - it keeps the solved AUTs of c.
+% Consequences: preservation of terms of the image of the substitution of c,
+% disjointness of the final domain and of the final solved labels from the
+% variables of the unsolved part of c, and the left- and right-hand side
+% substitutions built from the final solved part map the labels of the solved
+% AUTs of c to their sides.
+ antiunify_ancestor: LEMMA
+ FORALL (plc : (valid_plc?)) :
+   LET plcp = antiunifyC(plc) IN
+   FORALL (nc : qs_normal_conf | member(nc, plcp`2)) :
+     member(nc, plc`2) OR
+     EXISTS (c : (validConfiguration?) | member(c, plc`1), theta : nice_C_sub) :
+       nc`substitution = append(theta, c`substitution) AND
+       disjoint?(supset_dom(theta), difference(vars(c), labels(c`unsolved))) AND
+       (FORALL (x : variable) : member(x, labels(nc`solved)) IMPLIES
+          (member(x, labels(append(c`unsolved, c`solved))) OR NOT member(x, vars(c)))) AND
+       (FORALL (eq : AUT) : member(eq, c`solved) IMPLIES member(eq, nc`solved))
+
+% every final configuration was final or has an ancestor that it generalizes
+antiunify_sound_gen : LEMMA
+  FORALL (plc : (valid_plc?), nc : qs_normal_conf) :
+    member(nc, antiunifyC(plc)`2) IMPLIES
+      member(nc, plc`2) OR
+      EXISTS (c : (validConfiguration?)) :
+        member(c, plc`1) AND ancestor?(c, nc) AND gen_conf?(c, nc)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%% Antiunification - Soundness %%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+C_antiunify_is_sound  : LEMMA
+  FORALL (plc : (valid_plc?)) :
+     LET plcp = antiunifyC(plc) IN
+   FORALL (i : below(length(plcp`2))) :
+     LET  nc =  nth(plcp`2,i),
+          sigma = nc`substitution,
+	        rho_l = build_subs_left(nc`solved),
+	        rho_r = build_subs_right(nc`solved) IN
+	   member(nc, plc`2) OR
+	EXISTS(j : below(length(plc`1))) :
+    LET ac = nth(plc`1,j) IN  
+          generalizer_C?(ac`unsolved, sigma, rho_l, rho_r)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%% Proofs of TCCs and auxiliary lemmas (ProofLite)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%|- nice_C_sub_TCC1 : PROOF
+%|- (grind)
+%|- QED
+
+%|- vars_car_plc_TCC1 : PROOF
+%|- (subtype-tcc)
+%|- QED
+
+%|- vars_car_plc : PROOF
+%|- (grind)
+%|- QED
+
+%|- freshness_plc : PROOF
+%|- (then (skeep) (lemma "vars_car_plc") (inst - "plc") (lemma
+%|-       "freshness_membship") (inst-cp - "vars(plc)") (inst -
+%|-       "union(vars(plc), V)") (grind))
+%|- QED
+
+%|- fresh_set_aux : PROOF
+%|- (then (skeep) (expand* "empty?" "member" "intersection" "union" "subset?")
+%|-       (flatten) (spread (split 3) ((then (flatten) (inst -2 "L") (grind))
+%|-       (then (skosimp*) (inst -2 "x!1") (inst -3 "x!1") (grind)) (then
+%|-       (skosimp*) (inst -4 "x!1") (inst -3 "x!1") (grind)))))
+%|- QED
+
+%|- nice_sub_fresh : PROOF
+%|- (then (skeep) (label "fr" -1) (label "sub" -2) (lemma
+%|-       "niceness_preserv_conditions") (inst - "c" "set_lbl") (beta) (split
+%|-       -1) (propax) (flatten) (hide "fr") (lemma "fresh_set_aux") (inst -
+%|-       "car(c`unsolved)`label" "vars(t)" "set_lbl"
+%|-       "supset_dom(c`substitution)" "vars(img(c`substitution))") (assert)
+%|-       (flatten) (lemma "niceness_preservation") (inst -
+%|-       "car(c`unsolved)`label" "t" "c`substitution") (assert))
+%|- QED
+
+%|- DecF_TCC2 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "c!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecF_TCC3 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "c!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC2 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "c!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC3 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "c!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC4 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "c!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC5 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "c!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecF_TCC8 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecF_TCC9 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecF_TCC10 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecF_TCC11 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC1 : PROOF
+%|- (then (skosimp*) (typepred "plc!1") (expand* "match_DecF_nonC_conf?"
+%|-       "match_DecF_conf?" "match_DecCmmF_conf?" "match_DecP_conf?"
+%|-       "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (assert))
+%|- QED
+
+%|- DecCmmF_TCC2 : PROOF
+%|- (then (skosimp*) (typepred "plc!1") (expand* "match_DecF_nonC_conf?"
+%|-       "match_DecF_conf?" "match_DecCmmF_conf?" "match_DecP_conf?"
+%|-       "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (assert))
+%|- QED
+
+%|- DecCmmF_TCC4 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC5 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC6 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC7 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC8 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC9 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC10 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecCmmF_TCC11 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC10 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC11 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC12 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC13 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC14 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecP_TCC15 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "rhs!1") (typepred "plc!1")
+%|-       (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (auto-rewrite "C_term_term1" "C_term_term2"
+%|-       "C_term_arg" "C_term_arg_pair") (assert))
+%|- QED
+
+%|- DecF_TCC1 : PROOF
+%|- (then (skosimp*) (spread (split 1) ((then (typepred "lhs!1") (typepred
+%|-       "c!1") (typepred "c!1`substitution") (expand* "match_DecF_nonC_conf?"
+%|-       "match_DecF_conf?" "match_DecCmmF_conf?" "match_DecP_conf?"
+%|-       "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (use "C_sub_cons") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert) (expand "C_term?") (assert))
+%|-       (then (lemma "nice_sub_DecF") (inst - "c!1") (beta) (replace*)
+%|-       (assert)))))
+%|- QED
+
+%|- DecP_TCC1 : PROOF
+%|- (then (skosimp*) (spread (split 1) ((then (typepred "lhs!1") (typepred
+%|-       "c!1") (typepred "c!1`substitution") (expand* "match_DecF_nonC_conf?"
+%|-       "match_DecF_conf?" "match_DecCmmF_conf?" "match_DecP_conf?"
+%|-       "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym") (flatten) (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (replace*) (use "C_sub_cons") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert) (expand "C_term?") (assert))
+%|-       (then (lemma "nice_sub_DecP") (inst - "c!1") (beta) (replace*)
+%|-       (assert)))))
+%|- QED
+
+%|- DecF_TCC7 : PROOF
+%|- (then (skosimp*) (spread (split 1) ((then (typepred "lhs!1") (typepred
+%|-       "plc!1") (typepred "c!1`substitution") (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (replace*) (use
+%|-       "C_sub_cons") (assert) (expand "C_term?") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert)) (then (typepred "plc!1") (lemma
+%|-       "nice_sub_fresh") (inst - "c!1" "singleton(lbl!1)"
+%|-       "app(sym(eq!1`lhs), variable(lbl!1))") (lemma "freshness_plc") (inst -
+%|-       "plc!1" "emptyset[variable]") (replace*) (split -2) (then (replace*)
+%|-       (assert)) (then (skosimp*) (expand* "member" "add" "singleton")
+%|-       (flatten) (replace*) (grind :exclude ("vars" "validConfiguration?")))
+%|-       (then (expand* "subset?" "member" "singleton" "add") (skosimp*)
+%|-       (replace*) (grind :exclude ("validConfiguration?")))))))
+%|- QED
+
+%|- DecP_TCC9 : PROOF
+%|- (then (skosimp*) (spread (split 1) ((then (typepred "lhs!1") (typepred
+%|-       "plc!1") (typepred "c!1`substitution") (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (replace*) (use
+%|-       "C_sub_cons") (assert) (expand "C_term?") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert)) (then (typepred "plc!1") (lemma
+%|-       "nice_sub_fresh") (inst - "c!1" "add(lbl1!1, singleton(lbl2!1))"
+%|-       "pair(variable(lbl1!1), variable(lbl2!1))") (lemma "freshness_plc")
+%|-       (inst - "plc!1" "emptyset[variable]") (lemma "freshness_plc") (inst -
+%|-       "plc!1" "singleton(lbl1!1)") (replace*) (split -3) (then (replace*)
+%|-       (assert)) (then (skosimp*) (expand* "member" "add" "singleton")
+%|-       (flatten) (replace*) (grind :exclude ("vars" "validConfiguration?")))
+%|-       (then (expand* "subset?" "member" "singleton" "add") (skosimp*)
+%|-       (replace*) (grind :exclude ("validConfiguration?")))))))
+%|- QED
+
+%|- DecCmmF_TCC3 : PROOF
+%|- (then (skosimp*) (spread (split 1) ((then (typepred "lhs!1") (typepred
+%|-       "plc!1") (typepred "c!1`substitution") (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (replace*) (use
+%|-       "C_sub_cons") (assert) (expand "C_term?") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert)) (then (typepred "plc!1") (lemma
+%|-       "nice_sub_fresh") (inst - "c!1" "add(lbl1!1, singleton(lbl2!1))"
+%|-       "app(sym(lhs!1), pair(variable(lbl1!1), variable(lbl2!1)))") (lemma
+%|-       "freshness_plc") (inst - "plc!1" "emptyset[variable]") (lemma
+%|-       "freshness_plc") (inst - "plc!1" "singleton(lbl1!1)") (replace*)
+%|-       (split -3) (then (replace*) (assert)) (then (skosimp*) (expand*
+%|-       "member" "add" "singleton") (flatten) (replace*) (grind :exclude
+%|-       ("vars" "validConfiguration?"))) (then (expand* "subset?" "member"
+%|-       "singleton" "add") (skosimp*) (replace*) (grind :exclude
+%|-       ("validConfiguration?")))))))
+%|- QED
+
+%|- DecCmmF_TCC12 : PROOF
+%|- (then (skosimp*) (spread (split 1) ((then (typepred "lhs!1") (typepred
+%|-       "plc!1") (typepred "c!1`substitution") (expand*
+%|-       "match_DecF_nonC_conf?" "match_DecF_conf?" "match_DecCmmF_conf?"
+%|-       "match_DecP_conf?" "match_DecF?" "match_DecCmmF?" "match_DecP?" "sym")
+%|-       (flatten) (expand* "match_DecF_nonC_conf?" "match_DecF_conf?"
+%|-       "match_DecCmmF_conf?" "match_DecP_conf?" "match_DecF?"
+%|-       "match_DecCmmF?" "match_DecP?" "sym") (flatten) (replace*) (use
+%|-       "C_sub_cons") (assert) (expand "C_term?") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert)) (then (typepred "plc!1") (lemma
+%|-       "nice_sub_fresh") (inst - "c!1" "add(lbl3!1, singleton(lbl4!1))"
+%|-       "app(sym(lhs!1), pair(variable(lbl3!1), variable(lbl4!1)))") (lemma
+%|-       "freshness_plc") (inst - "plc!1" "add(lbl1!1, singleton(lbl2!1))")
+%|-       (lemma "freshness_plc") (inst - "plc!1"
+%|-       "add(lbl1!1, add(lbl2!1, singleton(lbl3!1)))") (replace*) (split -3)
+%|-       (then (replace*) (assert)) (then (skosimp*) (expand* "member" "add"
+%|-       "singleton") (flatten) (replace*) (grind :exclude ("vars"
+%|-       "validConfiguration?"))) (then (expand* "subset?" "member" "singleton"
+%|-       "add") (skosimp*) (replace*) (grind :exclude
+%|-       ("validConfiguration?")))))))
+%|- QED
+
+%|- Synt_TCC1 : PROOF
+%|- (then (skosimp*) (typepred "lhs!1") (typepred "c!1`substitution") (spread
+%|-       (split 1) ((then (use "C_sub_cons") (assert)) (then (lemma
+%|-       "nice_sub_Synt") (inst - "c!1") (replace*) (assert)))))
+%|- QED
+
+%|- Solve_TCC1 : PROOF
+%|- (then (skosimp*) (typepred "c!1`substitution") (spread (split 1) ((then (use
+%|-       "C_sub_cons") (assert) (expand "C_term?") (assert) (expand "C_term?")
+%|-       (assert) (expand "C_term?") (assert)) (then (lemma
+%|-       "nice_sub_Solved_AUT") (inst - "c!1") (replace*) (assert)))))
+%|- QED
+
+%|- build_subs_left_TCC3 : PROOF
+%|- (then (skosimp*) (typepred "auts!1") (lemma "validity_cdr_valid_AUTs") (inst
+%|-       - "auts!1") (assert))
+%|- QED
+
+%|- build_subs_left_TCC4 : PROOF
+%|- (then (skosimp*) (expand "length" 2 2) (assert))
+%|- QED
+
+%|- build_subs_left_TCC5 : PROOF
+%|- (then (skosimp*) (typepred "v!1(cdr[AUT](auts!1))") (typepred "aut!1`lhs")
+%|-       (use "C_sub_cons") (assert))
+%|- QED
+
+%|- build_subs_left_TCC6 : PROOF
+%|- (subtype-tcc)
+%|- QED
+
+%|- build_subs_right_TCC1 : PROOF
+%|- (then (skosimp*) (typepred "v!1(cdr[AUT](auts!1))") (typepred "aut!1`rhs")
+%|-       (use "C_sub_cons") (assert))
+%|- QED
+
+%|- nice_C_subs_left : PROOF
+%|- (then (skeep) (use "nice_subs_left"))
+%|- QED
+
+%|- nice_C_subs_right : PROOF
+%|- (then (skeep) (use "nice_subs_right"))
+%|- QED
+
+%|- generalizer_C?_TCC1 : PROOF
+%|- (then (skosimp*) (use "subs_C_var" ("sigma" "append(rho!1, sigma!1)" "X"
+%|-       "eq!1`label")))
+%|- QED
+
+%|- generalizer_C?_TCC2 : PROOF
+%|- (then (skosimp*) (use "subs_C_var" ("sigma" "append(delta!1, sigma!1)" "X"
+%|-       "eq!1`label")))
+%|- QED
+
+%|- antiunifyC_TCC11 : PROOF
+%|- (then (skosimp*) (replace*) (assert))
+%|- QED
+
+%|- antiunify_solved_substitution_TCC1 : PROOF
+%|- (then (skosimp*) (typepred "cf!1") (lemma "validity_append_valid_AUTs")
+%|-       (inst - "cf!1`unsolved" "cf!1`solved") (expand "validConfiguration?"
+%|-       -2) (flatten) (assert))
+%|- QED
+
+%|- C_antiunify_is_sound_TCC1 : PROOF
+%|- (then (skosimp*) (typepred "fc_i!1") (lemma "validity_append_valid_AUTs")
+%|-       (inst - "fc_i!1`unsolved" "fc_i!1`solved") (expand
+%|-       "validConfiguration?" -2) (flatten) (assert))
+%|- QED
+
+%|- C_antiunify_is_sound_TCC2 : PROOF
+%|- (then (skosimp*) (typepred "ac_j!1") (lemma "validity_append_valid_AUTs")
+%|-       (inst - "ac_j!1`unsolved" "ac_j!1`solved") (expand
+%|-       "validConfiguration?" -2) (flatten) (assert))
+%|- QED
+
+%%%% Proofs for the termination measure of antiunifyC (ProofLite)
+
+%|- sizes_ms_TCC1 : PROOF
+%|- (then (skosimp*) (use "empty_msT_is_finite"))
+%|- QED
+
+%|- sizes_ms_TCC3 : PROOF
+%|- (then (skosimp*) (typepred "v!1(cdr[(validConfiguration?)](lc!1))") (use
+%|-       "union_msT_fin_msT_is_fin_msT" ("m"
+%|-       "singleton_msT(size(car[(validConfiguration?)](lc!1)`unsolved))" "n"
+%|-       "v!1(cdr[(validConfiguration?)](lc!1))")))
+%|- QED
+
+%|- msT_gt_replace_TCC1 : PROOF
+%|- (then (skosimp*) (use "union_msT_fin_msT_is_fin_msT" ("m"
+%|-       "singleton_msT(a!1)" "n" "M!1")))
+%|- QED
+
+%|- msT_gt_replace_TCC2 : PROOF
+%|- (then (skosimp*) (use "union_msT_fin_msT_is_fin_msT" ("m" "Y!1" "n" "M!1")))
+%|- QED
+
+%|- conv_ms_ord_well_founded : PROOF
+%|- (then (lemma "msT_gt_well_founded") (expand "converse" -1) (expand "conv_ms_ord")
+%|-       (propax))
+%|- QED
+
+%|- antiunifyC_TCC1 : PROOF
+%|- (then (lemma "conv_ms_ord_well_founded") (expand "conv_ms_ord") (grind))
+%|- QED
+
+%|- msT_gt_replace : PROOF
+%|- (then (skeep) (expand "msT_gt?") (inst + "singleton_msT(a)" "Y") (spread
+%|-       (split 1) ((grind) (then (flatten) (decompose-equality -1) (inst -1
+%|-       "a") (grind)) (then (apply-extensionality :hide? t) (grind)) (then
+%|-       (skeep) (inst + "a") (inst -1 "y") (grind)))))
+%|- QED
+
+%|- conv_ms_ord_replace_car : PROOF
+%|- (then (skeep) (label "e" -1) (typepred "l1") (typepred "l2") (expand
+%|-       "conv_ms_ord") (expand "sizes_ms" 1) (assert) (replace "e") (use
+%|-       "msT_gt_replace" ("M" "sizes_ms(cdr(l2))" "Y"
+%|-       "singleton_msT(size(car(l1)`unsolved))" "a" "size(car(l2)`unsolved)"))
+%|-       (split -1) (propax) (grind))
+%|- QED
+
+%|- conv_ms_ord_replace_car2 : PROOF
+%|- (then (skeep) (label "e" -1) (typepred "l1") (typepred "l2") (expand
+%|-       "conv_ms_ord") (expand "sizes_ms" 1) (assert) (expand "sizes_ms" 1 2)
+%|-       (assert) (replace "e") (rewrite "union_msT_assoc") (spread (use
+%|-       "msT_gt_replace" ("M" "sizes_ms(cdr(l2))" "Y"
+%|-       "union_msT(singleton_msT(size(car(l1)`unsolved)), singleton_msT(size(car(cdr(l1))`unsolved)))"
+%|-       "a" "size(car(l2)`unsolved)")) ((then (split -1) (propax) (grind))
+%|-       (use "union_msT_fin_msT_is_fin_msT"))))
+%|- QED
+
+%|- conv_ms_ord_remove_car : PROOF
+%|- (then (skeep) (typepred "l") (expand "conv_ms_ord") (expand "sizes_ms" 1 1)
+%|-       (assert) (spread (use "msT_gt_replace" ("M" "sizes_ms(cdr(l))" "Y"
+%|-       "empty_msT" "a" "size(car(l)`unsolved)")) ((then (rewrite
+%|-       "union_msT_empty_msT_left" -1) (split -1) (propax) (grind)) (use
+%|-       "empty_msT_is_finite"))))
+%|- QED
+
+%|- antiunifyC_TCC3 : PROOF
+%|- (then (skosimp*) (replace*) (typepred "DecCmmF(plc!1)") (beta) (flatten)
+%|-       (expand "size") (use "conv_ms_ord_replace_car2" ("l1" "DecCmmF(plc!1)`1"
+%|-       "l2" "plc!1`1")) (assert))
+%|- QED
+
+%|- antiunifyC_TCC5 : PROOF
+%|- (then (skosimp*) (replace*) (typepred "DecF(plc!1)") (beta) (flatten)
+%|-       (expand "size") (use "conv_ms_ord_replace_car" ("l1" "DecF(plc!1)`1" "l2"
+%|-       "plc!1`1")) (assert))
+%|- QED
+
+%|- antiunifyC_TCC7 : PROOF
+%|- (then (skosimp*) (replace*) (typepred "DecP(plc!1)") (beta) (flatten)
+%|-       (expand "size") (use "conv_ms_ord_replace_car" ("l1" "DecP(plc!1)`1" "l2"
+%|-       "plc!1`1")) (assert))
+%|- QED
+
+%|- antiunifyC_TCC8 : PROOF
+%|- (then (skosimp*) (typepred "cp!1") (replace*) (expand "size") (use
+%|-       "conv_ms_ord_replace_car" ("l1" "cons(Synt(car(plc!1`1)), cdr(plc!1`1))"
+%|-       "l2" "plc!1`1")) (assert))
+%|- QED
+
+%|- antiunifyC_TCC10 : PROOF
+%|- (then (skosimp*) (typepred "cp!1") (replace*) (expand "size") (use
+%|-       "conv_ms_ord_replace_car" ("l1" "cons(Solve(car(plc!1`1)), cdr(plc!1`1))"
+%|-       "l2" "plc!1`1")) (assert))
+%|- QED
+
+%|- antiunifyC_TCC12 : PROOF
+%|- (then (skosimp*) (replace*) (expand "size") (use "conv_ms_ord_remove_car" ("l"
+%|-       "plc!1`1")) (assert))
+%|- QED
+
+%%%% Proofs by induction on the termination measure (ProofLite)
+
+%|- antiunify_final_nonempty : PROOF
+%|- (spread (measure-induct+ "size(plc)" ("plc") :order "conv_ms_ord") ((then (label
+%|-       "ih" -1) (spread (case "cons?(x!1`1)") ((spread (case
+%|-       "cons?(car(x!1`1)`unsolved)") ((spread (case
+%|-       "match_DecCmmF_conf?(car(x!1`1))") ((then (expand "antiunifyC" +)
+%|-       (assert) (typepred "DecCmmF(x!1)") (beta) (flatten) (inst "ih"
+%|-       "DecCmmF(x!1)") (assert) (expand "size") (use "conv_ms_ord_replace_car2"
+%|-       ("l1" "DecCmmF(x!1)`1" "l2" "x!1`1")) (assert)) (spread (case
+%|-       "match_DecF_conf?(car(x!1`1))") ((then (expand "antiunifyC" +) (assert)
+%|-       (typepred "DecF(x!1)") (beta) (flatten) (inst "ih" "DecF(x!1)")
+%|-       (assert) (expand "size") (use "conv_ms_ord_replace_car" ("l1" "DecF(x!1)`1"
+%|-       "l2" "x!1`1")) (assert)) (spread (case "match_DecP_conf?(car(x!1`1))")
+%|-       ((then (expand "antiunifyC" +) (assert) (typepred "DecP(x!1)") (beta)
+%|-       (flatten) (inst "ih" "DecP(x!1)") (assert) (expand "size") (use
+%|-       "conv_ms_ord_replace_car" ("l1" "DecP(x!1)`1" "l2" "x!1`1")) (assert))
+%|-       (spread (case "match_Synt_conf?(car(x!1`1))") ((then (expand
+%|-       "antiunifyC" +) (assert) (typepred "Synt(car(x!1`1))") (inst "ih"
+%|-       "(cons(Synt(car(x!1`1)), cdr(x!1`1)), x!1`2)") (assert) (expand
+%|-       "size") (use "conv_ms_ord_replace_car" ("l1"
+%|-       "cons(Synt(car(x!1`1)), cdr(x!1`1))" "l2" "x!1`1")) (assert)) (then
+%|-       (expand "antiunifyC" +) (assert) (typepred "Solve(car(x!1`1))") (inst
+%|-       "ih" "(cons(Solve(car(x!1`1)), cdr(x!1`1)), x!1`2)") (assert) (expand
+%|-       "size") (use "conv_ms_ord_replace_car" ("l1"
+%|-       "cons(Solve(car(x!1`1)), cdr(x!1`1))" "l2" "x!1`1")) (assert))))))))))
+%|-       (then (expand "antiunifyC" +) (assert) (inst "ih"
+%|-       "(cdr(x!1`1), cons(car(x!1`1), x!1`2))") (assert) (expand "size") (use
+%|-       "conv_ms_ord_remove_car" ("l" "x!1`1")) (assert)))) (then (expand
+%|-       "antiunifyC" +) (assert) (flatten) (assert))))) (use
+%|-       "conv_ms_ord_well_founded")))
+%|- QED
+
+%|- antiunify_monotony_Sol_AUTs_TCC1 : PROOF
+%|- (then (skosimp* :preds? t) (use "antiunify_final_nonempty") (assert))
+%|- QED
+
+%|- antiunify_domain_disjoint_sol_labels_TCC1 : PROOF
+%|- (then (skosimp* :preds? t) (use "antiunify_final_nonempty") (assert))
+%|- QED
+
+%|- antiunify_normality : PROOF
+%|- (then (skosimp* :preds? t) (expand "normal_plc?") (expand "antiunifyC")
+%|-       (assert))
+%|- QED
+
+end antiunif_C
+
